@@ -1,0 +1,25 @@
+# Secrets — never commit real credentials
+.env
+.env.*
+**/.env
+**/.env.*
+
+# Dependencies
+node_modules/
+**/node_modules/
+**/.bin/
+**/.package-lock.json
+
+# Angular build output
+client/dist/
+client/.angular/
+client/.vscode/
+*.log
+npm-debug.log*
+
+# Downloaded/generated data
+client/src/downloads/
+
+# System files
+.DS_Store
+Thumbs.db

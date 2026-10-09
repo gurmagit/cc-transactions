@@ -1,0 +1,46 @@
+/* @import "../node_modules/@angular/material/prebuilt-themes/deeppurple-amber.css"; */
+@import "~@angular/material/prebuilt-themes/indigo-pink.css";
+html, body { height: 100%; }
+body { margin: 0; font-family: Roboto, "Helvetica Neue", sans-serif; }
+
+.mat-mdc-checkbox .mdc-checkbox__ripple {
+  display: none;
+}
+
+#mat-select-0-panel {
+  max-height: 22rem !important;
+}
+
+.mdc-data-table__header-cell {
+  /* border: 2px solid #888; */
+  font-size: large;
+}
+
+/* .mdc-data-table__header-row {
+  background-color: #def3f7 !important;
+  top: -15px;
+  position: sticky;
+  z-index: 999;
+} */
+
+.mdc-data-table__cell:first-child {
+  border-left: 1px solid #888;
+}
+
+.mdc-data-table__cell:last-child {
+  border-right: 1px solid #888;
+}
+
+.mdc-data-table__cell {
+  border: 1px solid lightgray;
+}
+
+tr.mat-mdc-footer-row td {
+  font-weight: bold;
+  font-size: large;
+  background-color: #efd7f7;
+}
+
+.mat-mdc-select-value-text {
+  font-size: smaller;
+}

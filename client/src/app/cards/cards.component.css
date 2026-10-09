@@ -1,0 +1,90 @@
+.form-div {
+  display: flex;
+  width: 99.7%;
+  float: left;
+  margin: 0.3%;
+  position: sticky;
+  top: 0;
+  z-index: 1000;
+  background-color: white;
+}
+
+.args {
+  width: auto;
+}
+
+::ng-deep .mat-mdc-text-field-wrapper {
+  padding-left: 8px !important;
+  padding-right: 8px !important;
+}
+
+button {
+  display: inline-flex;
+  border-radius: 2rem;
+  margin: 8px;
+  font-size: 1.2rem;
+  width: auto;
+  height: 2.7rem !important;
+}
+
+mat-checkbox {
+  padding: 0 .3rem;
+}
+
+.select {
+  width: 30%;
+  margin-left: 2%;
+}
+
+.select mat-form-field {
+  width: 80%;
+}
+
+.search {
+  width: 15%;
+  float: left;
+}
+
+.date-range {
+  width: 20%;
+  float: left;
+}
+
+#link {
+  margin: 0.7rem 1.5rem;
+  width: 3%;
+  background-color: rgb(224, 216, 101);
+  cursor: pointer;
+}
+
+.mat-icon {
+  margin: auto;
+}
+
+.cards-table {
+  padding: 0 15px;
+  overflow-y: auto;
+  height: calc(90vh);
+}
+
+.sticky {
+  background-color: #def3f7 !important;
+  top: 0;
+  position: sticky;
+  z-index: 999;
+}
+
+table tr:last-child td {
+  border-bottom: 1px solid
+}
+
+.cards-table h3 {
+  background-color: lightpink;
+  float: left;
+  font-size: large;
+  font-weight: 500;
+}
+
+.mat-mdc-row {
+  height: 0.5rem;
+}
