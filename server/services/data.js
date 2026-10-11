@@ -1,5 +1,6 @@
 const { createScraper } = require('israeli-bank-scrapers')
 const { cardService } = require('./cardService')
+const db = require('./db')
 
 const sleep = ms => new Promise(r => setTimeout(r, ms))
 
@@ -23,7 +24,7 @@ class DataService {
       data.map(obj =>
         this.withRetry(async () => {
           const scraper = createScraper(obj.option)
-          obj.credentials.password = obj.credentials.card6Digits === '000000'
+          obj.credentials.password = ['000000', '000000'].includes(obj.credentials.card6Digits)
             ? process.env.PASSWORD2
             : process.env.PASSWORD1
           const scrapeResult = await scraper.scrape(obj.credentials)
@@ -45,6 +46,12 @@ class DataService {
       if (r.status === 'fulfilled') {
         r.value.forEach(account => {
           const num = account.accountNumber
+          db.insertBalanceSnapshot({
+            num,
+            balance: account.balance,
+            cardFrame: account.cardFrame,
+            balanceDate: account.balanceDate,
+          })
           if (!account.txns || account.txns.length === 0) {
             console.log('no transactions:', num)
             return
@@ -55,6 +62,7 @@ class DataService {
             const orig = -txn.originalAmount
             result.data.push({
               num,
+              identifier: txn.identifier,
               date: txn.date.slice(0, 10),
               amount,
               originalAmount: orig,
@@ -76,6 +84,7 @@ class DataService {
         })
       }
     })
+    db.upsertTransactions(result.data)
     console.log('len:', result.data.length, 'errors:', result.errors.length)
     return result
   }

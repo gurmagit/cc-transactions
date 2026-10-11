@@ -25,8 +25,8 @@ Create `server/.env` (git-ignored, never commit this file) with:
 
 | Variable | Purpose |
 |---|---|
-| `PASSWORD1` | Login password used for most accounts |
-| `PASSWORD2` | Login password used specifically for the account with card ending `000000` |
+| `PASSWORD1` | Login password used for first account |
+| `PASSWORD2` | Login password used for second account |
 | `ACCOUNTS_JSON` | JSON array of accounts to scrape, e.g. `[{"companyId":"isracard","id":"...","card6Digits":"..."},{"companyId":"max","username":"..."}]` |
 
 Run with `node server.js` (listens on port 3010).

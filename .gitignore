@@ -19,6 +19,7 @@ npm-debug.log*
 
 # Downloaded/generated data
 client/src/downloads/
+server/data/
 
 # System files
 .DS_Store

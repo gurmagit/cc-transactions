@@ -22,6 +22,13 @@ class CardService {
           card6Digits: JSON.parse(process.env.ACCOUNTS_JSON)[n].card6Digits
         }
         break;
+      case 'amex':
+        this.obj[0].companyId = CompanyTypes.amex;
+        this.obj[1] = {
+          id: JSON.parse(process.env.ACCOUNTS_JSON)[n].id,
+          card6Digits: JSON.parse(process.env.ACCOUNTS_JSON)[n].card6Digits
+        }
+        break;
       case 'max':
         this.obj[0].companyId = CompanyTypes.max;
         this.obj[1] = {

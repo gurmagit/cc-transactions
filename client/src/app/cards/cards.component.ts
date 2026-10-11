@@ -1,7 +1,7 @@
-import { Component, ElementRef, OnInit, ViewChild } from '@angular/core';
+import { AfterViewInit, Component, ElementRef, OnInit, ViewChild } from '@angular/core';
 import { CardService, FetchError } from '../services/card.service';
 import { CardItem } from '../models/card.model';
-import { BehaviorSubject, finalize } from 'rxjs';
+import { BehaviorSubject, finalize, switchMap } from 'rxjs';
 import { MatSort } from '@angular/material/sort';
 import { MatTableDataSource } from '@angular/material/table';
 
@@ -10,7 +10,7 @@ import { MatTableDataSource } from '@angular/material/table';
   templateUrl: './cards.component.html',
   styleUrls: ['./cards.component.css']
 })
-export class CardsComponent implements OnInit {
+export class CardsComponent implements OnInit, AfterViewInit {
   isLoading$ = new BehaviorSubject<boolean>(false);
   displayedColumns = ['num', 'date', 'amount', 'originalAmount', 'desc', 'memo'];
   headers = ['Card Number', 'Date', 'Amount', 'Original Amount', 'Description', 'Comments'];
@@ -38,8 +38,6 @@ export class CardsComponent implements OnInit {
     cards: [] as any,
     dates: { start: '', end: '' }
   };
-  days: number = 30;
-  months: number = 0;
   start_date = '';
   end_date = '';
 
@@ -50,47 +48,69 @@ export class CardsComponent implements OnInit {
   }
 
   ngOnInit(): void {
-    this.fetchData(false);
+    this.setPreviousMonthFilter();
+    this.loadHistory();
   }
 
-  fetchData(flag = true) {
-    console.log('submit:', this.days, this.months);
+  ngAfterViewInit(): void {
+    this.reflectDateFilterInputs();
+  }
+
+  fetchData() {
     this.isLoading$.next(true);
-    this.cardService.getCards(this.days, this.months, flag).pipe(
+    this.cardService.triggerScrape(30, 0).pipe(
+      switchMap(() => this.cardService.getTransactions()),
       finalize(() => this.isLoading$.next(false))
     ).subscribe({
-      next: (cards: CardItem[]) => {
-        console.log('cards:', cards);
-        this.cardsData = new MatTableDataSource(cards);
-        if (this.sort) {
-          this.cardsData.sort = this.sort;
-        }
-        this.cardsData.filterPredicate = this.setFilter();
-        const previousAllCards = this.allCards;
-        this.allCards = this.cardService.cardNumbers$.value;
-        if (!flag || !this.searchObj.cards.length) {
-          this.searchObj.cards = [...this.allCards];
-          this.selectedCards$.next([...this.allCards]);
-        } else {
-          // a card that wasn't available before (e.g. its login had been failing)
-          // should show up by default rather than staying silently excluded
-          const newlySeen = this.allCards.filter((c: string) => !previousAllCards.includes(c));
-          if (newlySeen.length) {
-            this.searchObj.cards = [...this.searchObj.cards, ...newlySeen];
-            this.selectedCards$.next([...this.selectedCards$.value, ...newlySeen]);
-          }
-        }
-        this.start_date = new Date(Math.min(...cards.map((c: CardItem) =>
-          new Date(c.date).getTime()))).toISOString().split('T')[0];
-        this.end_date = new Date(Math.max(...cards.map((c: CardItem) =>
-          new Date(c.date).getTime()))).toISOString().split('T')[0];
-        this.applyFilter(JSON.stringify(this.searchObj));
-      },
-      error: (err) => {
+      next: (cards: CardItem[]) => this.applyCards(cards),
+      error: (err: any) => {
         console.error('fetchData failed:', err);
         this.fetchErrors$.next([{ company: 'request', message: err?.message || 'Request to the server failed' }]);
       }
     });
+  }
+
+  private loadHistory() {
+    this.isLoading$.next(true);
+    this.cardService.getTransactions().pipe(
+      finalize(() => this.isLoading$.next(false))
+    ).subscribe({
+      next: (cards: CardItem[]) => this.applyCards(cards),
+      error: (err: any) => {
+        console.error('loadHistory failed:', err);
+        this.fetchErrors$.next([{ company: 'request', message: err?.message || 'Request to the server failed' }]);
+      }
+    });
+  }
+
+  private applyCards(cards: CardItem[]) {
+    console.log('cards:', cards);
+    this.cardsData = new MatTableDataSource(cards);
+    if (this.sort) {
+      this.cardsData.sort = this.sort;
+    }
+    this.cardsData.filterPredicate = this.setFilter();
+    const previousAllCards = this.allCards;
+    this.allCards = this.cardService.cardNumbers$.value;
+    if (!this.searchObj.cards.length) {
+      this.searchObj.cards = [...this.allCards];
+      this.selectedCards$.next([...this.allCards]);
+    } else {
+      // a card that wasn't available before (e.g. its login had been failing)
+      // should show up by default rather than staying silently excluded
+      const newlySeen = this.allCards.filter((c: string) => !previousAllCards.includes(c));
+      if (newlySeen.length) {
+        this.searchObj.cards = [...this.searchObj.cards, ...newlySeen];
+        this.selectedCards$.next([...this.selectedCards$.value, ...newlySeen]);
+      }
+    }
+    if (cards.length) {
+      this.start_date = new Date(Math.min(...cards.map((c: CardItem) =>
+        new Date(c.date).getTime()))).toISOString().split('T')[0];
+      this.end_date = new Date(Math.max(...cards.map((c: CardItem) =>
+        new Date(c.date).getTime()))).toISOString().split('T')[0];
+    }
+    this.applyFilter(JSON.stringify(this.searchObj));
   }
 
   calculateTotal() {
@@ -143,17 +163,27 @@ export class CardsComponent implements OnInit {
   }
 
   previousMonth() {
-    const start = this.getLastThirteenth();
-    this.searchObj.dates.start = start;
-    this.searchObj.dates.end = '';
-    this.setDateInputValue(this.startDateInput, this.toDisplayDate(start));
-    this.setDateInputValue(this.endDateInput, '');
-    if (start < this.start_date) {
-      this.days = Math.floor((Date.now() - Date.parse(start)) / 86400000);
-      this.months = 0;
-      this.fetchData(true);
-    }
+    this.setPreviousMonthFilter();
+    this.reflectDateFilterInputs();
     this.applyFilter(JSON.stringify(this.searchObj));
+  }
+
+  private setPreviousMonthFilter() {
+    this.searchObj.dates.start = this.getLastThirteenth();
+    this.searchObj.dates.end = this.formatLocalDate(new Date());
+  }
+
+  showFutureTransactions() {
+    this.searchObj.dates.end = '';
+    this.reflectDateFilterInputs();
+    this.applyFilter(JSON.stringify(this.searchObj));
+  }
+
+  private reflectDateFilterInputs() {
+    this.setDateInputValue(this.startDateInput,
+      this.searchObj.dates.start ? this.toDisplayDate(this.searchObj.dates.start) : '');
+    this.setDateInputValue(this.endDateInput,
+      this.searchObj.dates.end ? this.toDisplayDate(this.searchObj.dates.end) : '');
   }
 
   private toDisplayDate(isoDate: string): string {
@@ -188,36 +218,37 @@ export class CardsComponent implements OnInit {
     console.log('picker:', start, end);
     this.searchObj.dates.start = start;
     this.searchObj.dates.end = end;
-    if ((start !== '' && start < this.start_date) || (end !== '' && end > this.end_date)) {
-      this.days = Math.floor((Date.now() - Date.parse(start || this.start_date)) / 86400000);
-      this.months = Math.ceil((Date.parse(end || this.end_date) - Date.now()) / 86400000 / 30);
-      if (this.months < 0) this.months = 0;
-      this.fetchData(true);
-    }
     this.applyFilter(JSON.stringify(this.searchObj));
   }
 
   applyFilter(filter: string) {
-    console.log('filter:', JSON.parse(filter));
     this.cardsData.filter = filter;
-    console.log('filtered cards:', this.cardsData.filteredData);
     this.calculateTotal();
   }
 
   setFilter() {
+    // the predicate runs once per row, but MatTableDataSource passes the same
+    // filter string each time — cache the parsed version instead of re-parsing
+    // (and re-stringifying every row) on every single row, every filter change
+    let cachedFilterStr: string | null = null;
+    let cachedSearch: any = null;
     return (data: CardItem, filter: string) => {
-      let matchCards = true;
-      let matchSearch = true;
-      let matchDate = true;
-      const search = JSON.parse(filter);
-      const row = JSON.stringify(data);
-      const wc = search.wildcard;
-      matchSearch = wc === '' || row.toLowerCase().includes(wc.toLowerCase());
-      matchCards = search.cards.includes(data.num);
-      matchDate = (search.dates.start === '' || data.date >= search.dates.start) &&
+      if (filter !== cachedFilterStr) {
+        cachedFilterStr = filter;
+        cachedSearch = JSON.parse(filter);
+      }
+      const search = cachedSearch;
+      const wc = search.wildcard.toLowerCase();
+      const matchSearch = wc === '' ||
+        data.num.toLowerCase().includes(wc) ||
+        data.date.toLowerCase().includes(wc) ||
+        data.desc.toLowerCase().includes(wc) ||
+        data.memo.toLowerCase().includes(wc) ||
+        String(data.amount).includes(wc) ||
+        String(data.originalAmount).includes(wc);
+      const matchCards = search.cards.includes(data.num);
+      const matchDate = (search.dates.start === '' || data.date >= search.dates.start) &&
         (search.dates.end === '' || data.date <= search.dates.end);
-      // console.log('matches:', matchCards, matchDate, matchSearch);
-      if (matchDate) console.log('compare ends:', data.date, search.dates.end);
       return matchCards && matchSearch && matchDate;
     }
   }
@@ -246,21 +277,6 @@ export class CardsComponent implements OnInit {
       csvData.push(Object.values(rowObj));
     });
     return csvData.join('\n');
-  }
-
-  onlyNum(e: any, len = 3, max = 9) {
-    const target = e.target;
-    const val = target.value;
-    console.log('val:', val);
-    const CHAR_CODES = [8, 37, 38, 39, 40, 46, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57];
-    if (!CHAR_CODES.includes(e.keyCode)) {
-      e.preventDefault();
-    } else if (e.code.slice(0, 5) === 'Digit' && (val.length >= len || e.key > max)
-      && target.selectionStart == target.selectionEnd) {
-      e.preventDefault();
-    }
-    if (target.name == 'days') this.days = val;
-    if (target.name == 'months') this.months = val;
   }
 
 }

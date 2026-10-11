@@ -47,6 +47,7 @@ mat-checkbox {
 
 .date-range {
   width: 20%;
+  min-width: 260px;
   float: left;
 }
 
@@ -87,4 +88,19 @@ table tr:last-child td {
 
 .mat-mdc-row {
   height: 0.5rem;
+}
+
+::ng-deep .mat-mdc-table,
+::ng-deep .mdc-data-table__table {
+  table-layout: auto !important;
+  width: fit-content !important;
+  min-width: auto !important;
+}
+
+::ng-deep th.mat-mdc-header-cell,
+::ng-deep td.mat-mdc-cell,
+::ng-deep td.mat-mdc-footer-cell {
+  white-space: nowrap !important;
+  padding: 0 4px !important;
+  width: auto !important;
 }

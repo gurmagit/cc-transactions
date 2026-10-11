@@ -1,15 +1,5 @@
 <div class="form-div">
   <div fxLayout="row" fxLayoutAlign="start center" fxLayoutGap="16px">
-    <mat-form-field subscriptSizing="dynamic" fxFlex="5%">
-      <mat-label>Days</mat-label>
-      <input matInput placeholder="Days" name="days" type="text" [value]="days"
-        (keyup)="onlyNum($event)" (input)="onlyNum($event)">
-    </mat-form-field>
-    <mat-form-field subscriptSizing="dynamic" fxFlex="4%">
-      <mat-label>Months</mat-label>
-      <input matInput placeholder="Months" name="months" type="text"
-        [value]="months" (keyup)="onlyNum($event,1,6)" (change)="onlyNum($event,1,6)">
-    </mat-form-field>
     <button mat-flat-button matSuffix color="primary" (click)="fetchData()">Submit</button>
     <mat-form-field subscriptSizing="dynamic" fxFlex="30%">
       <mat-label>Select cards</mat-label>
@@ -38,6 +28,9 @@
     </button>
     <button mat-icon-button matSuffix matTooltip="Previous month" (click)="previousMonth()">
       <mat-icon>calendar_month</mat-icon>
+    </button>
+    <button mat-icon-button matSuffix matTooltip="Show future transactions" (click)="showFutureTransactions()">
+      <mat-icon>update</mat-icon>
     </button>
     <button *ngIf="!(isLoading$ | async)" id="link" (click)="downloadCSV()">
       <mat-icon>download</mat-icon>

@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const { dataService } = require('../services/data');
+const db = require('../services/db');
 
 router.get('/', async (req, res) => {
   const query = req.query;
@@ -9,6 +10,10 @@ router.get('/', async (req, res) => {
   const months = parseInt(query.months) || 0;
   const result = await dataService.fetchData(days, months);
   res.send(result);
+});
+
+router.get('/transactions', (req, res) => {
+  res.send(db.getAllTransactions());
 });
 
 module.exports = router;
