@@ -103,5 +103,6 @@
       <tspan [attr.x]="seg.labelX" dy="1.3em" class="pie-label-amt">{{seg.total | currency:'ILS':'symbol':'1.0-0'}}</tspan>
     </text>
   </svg>
+  <div class="chart-total">Total: {{totalCost | currency:'ILS'}}</div>
 </div>
 </div>
