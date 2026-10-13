@@ -46,11 +46,11 @@ Navigate to `http://localhost:4200`.
 - `GET /cards?days=&months=` — runs a live scrape (regular Isracard/Max accounts via the library, then the Amex card sequentially — see below), upserts results into SQLite, returns `{ data, errors }`
 - `GET /cards/transactions` — reads all stored transactions straight from SQLite, no live scrape (used for normal page loads; `/cards` is only hit by the Submit button)
 
-## Amex card (3802)
+## Amex-branded card
 
 Amex's own site blocks automated access, but the Amex-branded card is reachable through the shared Isracard backend using a plain (non-stealth) Puppeteer login with real credentials. This is handled separately from the regular library-based scrape:
 
-- `server/services/isracardBackfill.js` — logs into Isracard id `025647512` and pulls card `3802`'s transactions via the shared `GetTransactionsList` API. Hardcoded to that one card/id.
+- `server/services/isracardBackfill.js` — logs into one specific Isracard account and pulls that one Amex-branded card's transactions via the shared `GetTransactionsList` API. The account id and card suffix are hardcoded (see the constants at the top of the file) rather than read from `ACCOUNTS_JSON`.
 - Runs automatically as part of `GET /cards`, after the regular scrape, sequentially (not concurrently — logging into the same Isracard account twice at once gets flagged as automation).
 - `server/backfill-amex.js` — standalone full-year backfill script: `node backfill-amex.js`.
 - `server/backfill-max.js` — standalone backfill script scoped to just the Max account (e.g. to backfill history without re-touching Isracard): `node backfill-max.js`.
