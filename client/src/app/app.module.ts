@@ -20,7 +20,7 @@ import { MatInputModule } from '@angular/material/input';
 import { MatSelectModule } from '@angular/material/select';
 import { MatCheckboxModule } from '@angular/material/checkbox';
 import { MatDatepickerModule } from '@angular/material/datepicker';
-import { MatNativeDateModule } from '@angular/material/core'
+import { MatNativeDateModule, MAT_DATE_LOCALE } from '@angular/material/core'
 import { MatTooltipModule } from '@angular/material/tooltip';
 import { FlexLayoutModule } from '@angular/flex-layout';
 
@@ -53,7 +53,15 @@ import { FlexLayoutModule } from '@angular/flex-layout';
     MatTooltipModule,
     FlexLayoutModule
   ],
-  providers: [],
+  providers: [
+    // must be here, not in main.ts's bootstrap providers — MatNativeDateModule
+    // (above, in imports) registers its own MAT_DATE_LOCALE provider, and an
+    // NgModule's own providers take precedence over its imports' for the
+    // same token, so a bootstrap-level override gets silently shadowed.
+    // en-GB gives dd/mm/yyyy (slashes), matching what
+    // cards.component.ts's formatDate() parses; he-IL uses dots instead.
+    {provide: MAT_DATE_LOCALE, useValue: 'en-GB'},
+  ],
   bootstrap: [AppComponent]
 })
 export class AppModule { }

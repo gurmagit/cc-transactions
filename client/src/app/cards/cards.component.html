@@ -1,7 +1,7 @@
 <div class="form-div">
   <div fxLayout="row" fxLayoutAlign="start center" fxLayoutGap="16px">
     <button mat-flat-button matSuffix color="primary" (click)="fetchData()">Submit</button>
-    <mat-form-field subscriptSizing="dynamic" fxFlex="30%">
+    <mat-form-field subscriptSizing="dynamic" class="select-cards">
       <mat-label>Select cards</mat-label>
       <mat-select [ngModel]="selectedCards$ | async"
         (valueChange)="updateSelected($event)" multiple>
@@ -29,7 +29,10 @@
     <button mat-icon-button matSuffix matTooltip="Previous month" (click)="previousMonth()">
       <mat-icon>calendar_month</mat-icon>
     </button>
-    <button mat-icon-button matSuffix matTooltip="Show future transactions" (click)="showFutureTransactions()">
+    <button mat-icon-button matSuffix
+      [color]="showingFuture ? 'primary' : ''"
+      [matTooltip]="showingFuture ? 'Showing future transactions — click to go back' : 'Show future transactions'"
+      (click)="toggleFutureTransactions()">
       <mat-icon>update</mat-icon>
     </button>
     <button *ngIf="!(isLoading$ | async)" id="link" (click)="downloadCSV()">
@@ -43,6 +46,7 @@
     <li *ngFor="let err of (fetchErrors$ | async)">{{err.company}} ({{err.type}}): {{err.message}}</li>
   </ul>
 </div>
+<div class="content-row">
 <div class="mat-elevation-z8 cards-table">
   <h3 *ngIf="isLoading$ | async">Loading data...</h3>
   <table
@@ -87,4 +91,17 @@
     <tr mat-row *matRowDef="let row; columns: displayedColumns;"></tr>
     <tr mat-footer-row *matFooterRowDef="displayedColumns" [hidden]="selectedCards$.value.length==0"></tr>
   </table>
+</div>
+<div class="chart-panel mat-elevation-z8" *ngIf="chartSegments.length">
+  <svg class="pie" viewBox="0 0 240 240" preserveAspectRatio="xMidYMid meet">
+    <path *ngFor="let seg of chartSegments" [attr.d]="seg.path" [attr.fill]="seg.color"></path>
+    <polyline *ngFor="let seg of chartSegments" [attr.points]="seg.leaderPoints"
+      class="pie-leader" fill="none"></polyline>
+    <text *ngFor="let seg of chartSegments" [attr.x]="seg.labelX" [attr.y]="seg.labelY" [attr.fill]="seg.labelColor"
+      [attr.text-anchor]="seg.textAnchor" dominant-baseline="middle">
+      <tspan [attr.x]="seg.labelX" dy="-0.5em" class="pie-label-num">{{seg.num}}</tspan>
+      <tspan [attr.x]="seg.labelX" dy="1.3em" class="pie-label-amt">{{seg.total | currency:'ILS':'symbol':'1.0-0'}}</tspan>
+    </text>
+  </svg>
+</div>
 </div>

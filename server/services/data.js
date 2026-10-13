@@ -5,7 +5,7 @@ const db = require('./db')
 const sleep = ms => new Promise(r => setTimeout(r, ms))
 
 class DataService {
-  async fetchData(days, months = 1) {
+  async fetchData(days, months = 1, companyFilter = null) {
     if (days < 31) {
       const d = new Date()
       const day_of_month = d.getDate()
@@ -15,11 +15,9 @@ class DataService {
         days = day_of_month - 12
       }
     }
-    console.log('days:', days, 'months:', months)
     const startDate = new Date(Date.now() - days * 86400000)
-    console.log('startDate:', startDate)
     const result = { data: [], errors: [] }
-    const data = this.buildOptions(startDate, months)
+    const data = this.buildOptions(startDate, months, companyFilter)
     const results = await Promise.allSettled(
       data.map(obj =>
         this.withRetry(async () => {
@@ -44,6 +42,9 @@ class DataService {
 
     results.forEach((r, i) => {
       if (r.status === 'fulfilled') {
+        // this library's raw chargedAmount is negative-for-purchase for both
+        // Isracard and Max — confirmed directly against known real transactions
+        const sign = -1
         r.value.forEach(account => {
           const num = account.accountNumber
           db.insertBalanceSnapshot({
@@ -58,8 +59,8 @@ class DataService {
           }
           console.log('card number:', num)
           account.txns.forEach(txn => {
-            const amount = -txn.chargedAmount
-            const orig = -txn.originalAmount
+            const amount = sign * txn.chargedAmount
+            const orig = sign * txn.originalAmount
             result.data.push({
               num,
               identifier: txn.identifier,
@@ -101,10 +102,11 @@ class DataService {
     return singleLine.length > max ? singleLine.slice(0, max) + '…' : singleLine
   }
 
-  buildOptions(startDate, months) {
+  buildOptions(startDate, months, companyFilter = null) {
     const arr = []
     const accounts = JSON.parse(process.env.ACCOUNTS_JSON)
     accounts.forEach((account, n) => {
+      if (companyFilter && account.companyId !== companyFilter) return
       const obj = cardService.getObject(n)
       const option = { ...obj[0] }
       const credentials = obj[1]
@@ -121,6 +123,7 @@ class DataService {
   async withRetry(fn, {
     retries = 3,
     delay = 1000,
+    rateLimitDelay = 60000,
     onFail,
   } = {}) {
     let lastError
@@ -130,7 +133,12 @@ class DataService {
       } catch (err) {
         lastError = err
         onFail?.(err, i)
-        if (i < retries) await sleep(delay)
+        if (i < retries) {
+          // a 429/"automation detected" response means the server wants us
+          // to back off much longer, not retry at the normal quick pace
+          const isRateLimited = /429|automation detected/i.test(err.message || '')
+          await sleep(isRateLimited ? rateLimitDelay : delay)
+        }
       }
     }
     throw lastError

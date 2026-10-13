@@ -40,6 +40,19 @@ mat-checkbox {
   width: 80%;
 }
 
+::ng-deep .select-cards.mat-mdc-form-field {
+  width: auto !important;
+}
+
+::ng-deep .select-cards .mat-mdc-text-field-wrapper {
+  width: auto !important;
+}
+
+::ng-deep .select-cards .mat-mdc-form-field-infix {
+  width: auto !important;
+  min-width: 0 !important;
+}
+
 .search {
   width: 15%;
   float: left;
@@ -62,10 +75,54 @@ mat-checkbox {
   margin: auto;
 }
 
+.content-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 16px;
+  /* .form-div is floated; without this, content-row (a flex formatting
+     context) avoids the float instead of flowing below it, and gets
+     squeezed into its leftover sliver of width */
+  clear: both;
+}
+
 .cards-table {
   padding: 0 15px;
-  overflow-y: auto;
+  overflow: auto;
   height: calc(90vh);
+  /* content-sized, not stretched — the chart panel is the one that grows */
+  flex: 0 1 auto;
+}
+
+.chart-panel {
+  flex: 1 1 auto;
+  min-width: 280px;
+  padding: 8px;
+  margin: 0 15px;
+}
+
+.pie {
+  display: block;
+  width: 100%;
+  height: auto;
+  aspect-ratio: 1 / 1;
+}
+
+.pie-label-num {
+  font-size: 6.3px;
+  font-weight: 700;
+  pointer-events: none;
+}
+
+.pie-label-amt {
+  font-size: 6.6px;
+  font-weight: 400;
+  font-variant-numeric: tabular-nums;
+  pointer-events: none;
+}
+
+.pie-leader {
+  stroke: #898781;
+  stroke-width: 1;
 }
 
 .sticky {
