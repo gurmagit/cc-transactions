@@ -4,6 +4,14 @@ import { CardItem } from '../models/card.model';
 import { BehaviorSubject, finalize, switchMap } from 'rxjs';
 import { MatSort } from '@angular/material/sort';
 import { MatTableDataSource } from '@angular/material/table';
+import { MatDialog } from '@angular/material/dialog';
+import { ConfirmCategoryDialogComponent, ConfirmCategoryDialogResult } from './confirm-category-dialog.component';
+
+interface PieSegment {
+  num: string; total: number; color: string; path: string;
+  inside: boolean; labelX: number; labelY: number; labelColor: string; textAnchor: string;
+  leaderPoints?: string;
+}
 
 @Component({
   selector: 'app-cards',
@@ -12,8 +20,18 @@ import { MatTableDataSource } from '@angular/material/table';
 })
 export class CardsComponent implements OnInit, AfterViewInit {
   isLoading$ = new BehaviorSubject<boolean>(false);
-  displayedColumns = ['num', 'date', 'amount', 'originalAmount', 'desc', 'memo'];
-  headers = ['Card Number', 'Date', 'Amount', 'Original Amount', 'Description', 'Comments'];
+  displayedColumns = ['num', 'date', 'amount', 'originalAmount', 'desc', 'memo', 'category'];
+  headers = ['Card Number', 'Date', 'Amount', 'Original Amount', 'Description', 'Comments', 'Category'];
+  // mirrors server/services/categorize.js's CATEGORIES — kept in sync by hand
+  // since client/server don't share a package
+  readonly CATEGORIES = [
+    'ביגוד', 'בילויים', 'סופר', 'בריאות ושיניים', 'ביטוח', 'תחבורה',
+    'עירייה וממשלה', 'תקשורת', 'חשבונות בית', 'טיפוח וכושר', 'חיות מחמד', 'חצר וגינה', 'החזרים', 'חופשה', 'שונות',
+  ];
+  // reimbursements aren't real spending — exclude them from every total
+  // (grand total, per-card pie, monthly bar chart), but the category pie
+  // still needs to show the slice so the user can see how much came back
+  private readonly EXCLUDED_FROM_TOTAL_CATEGORY = 'החזרים';
   cardsData!: MatTableDataSource<CardItem>;
   private _sort?: MatSort;
   @ViewChild(MatSort) set sort(sort: MatSort | undefined) {
@@ -42,27 +60,40 @@ export class CardsComponent implements OnInit, AfterViewInit {
   end_date = '';
   showingFuture = false;
 
-  // categorical palette, fixed order — a card keeps its slot for the whole
-  // session regardless of filtering, so color always means the same card
+  // categorical palette, fixed order — a card (or category) keeps its slot
+  // for the whole session regardless of filtering, so color always means
+  // the same card/category
   private readonly CARD_PALETTE = [
     '#2a78d6', '#eb6834', '#1baf7a', '#eda100',
     '#e87ba4', '#008300', '#4a3aa7', '#e34948',
   ];
   private cardColors = new Map<string, string>();
-  chartSegments: {
-    num: string; total: number; color: string; path: string;
-    inside: boolean; labelX: number; labelY: number; labelColor: string; textAnchor: string;
-    leaderPoints?: string;
-  }[] = [];
+  // categories are a known fixed list, so colors can be assigned upfront
+  // rather than lazily like cardColors (card numbers aren't known upfront)
+  private readonly categoryColors = new Map<string, string>(
+    this.CATEGORIES.map((c, i) => [c, this.CARD_PALETTE[i % this.CARD_PALETTE.length]])
+  );
+  private readonly UNCATEGORIZED = 'לא מסווג';
+  private readonly UNCATEGORIZED_COLOR = '#898781';
+
+  chartSegments: PieSegment[] = [];
+  categoryChartSegments: PieSegment[] = [];
 
   constructor(
-    private cardService: CardService
+    private cardService: CardService,
+    private dialog: MatDialog
   ) {
     this.fetchErrors$ = this.cardService.fetchErrors$;
   }
 
   ngOnInit(): void {
-    this.setPreviousMonthFilter();
+    // a page refresh should keep whatever the user was looking at, not
+    // reset to the default billing cycle — only genuinely new sessions
+    // (no saved state yet) get the default
+    if (!this.restoreFilterState()) {
+      this.setPreviousMonthFilter();
+    }
+    this.buildMonthOptions();
     this.loadHistory();
   }
 
@@ -126,8 +157,12 @@ export class CardsComponent implements OnInit, AfterViewInit {
       const newlySeen = this.allCards.filter((c: string) => !previousAllCards.includes(c));
       if (newlySeen.length) {
         this.searchObj.cards = [...this.searchObj.cards, ...newlySeen];
-        setTimeout(() => this.selectedCards$.next([...this.selectedCards$.value, ...newlySeen]));
       }
+      // always resync (not just when newlySeen is non-empty) — a restored
+      // filter (see restoreFilterState) lands here on a fresh component
+      // instance where selectedCards$ was never populated at all
+      setTimeout(() => this.selectedCards$.next([...this.searchObj.cards]));
+      this.selectAllChkBox = this.searchObj.cards.length === this.allCards.length;
     }
     if (cards.length) {
       this.start_date = new Date(Math.min(...cards.map((c: CardItem) =>
@@ -135,11 +170,17 @@ export class CardsComponent implements OnInit, AfterViewInit {
       this.end_date = new Date(Math.max(...cards.map((c: CardItem) =>
         new Date(c.date).getTime()))).toISOString().split('T')[0];
     }
+    // full history, not the current filter — a trend needs more than the
+    // single cycle the pies are scoped to, so this only needs recomputing
+    // when the underlying data changes, not on every filter tweak
+    this.buildMonthlyTotals(cards);
     this.applyFilter(JSON.stringify(this.searchObj));
   }
 
   calculateTotal() {
-    this.totalCost = this.cardsData.filteredData.reduce((a: number, v: any) => a + v.amount, 0);
+    this.totalCost = this.cardsData.filteredData
+      .filter((v: CardItem) => v.category !== this.EXCLUDED_FROM_TOTAL_CATEGORY)
+      .reduce((a: number, v: CardItem) => a + v.amount, 0);
     this.buildChartData();
   }
 
@@ -162,22 +203,28 @@ export class CardsComponent implements OnInit, AfterViewInit {
   // color (see CARD_PALETTE/cardColors) so identity stays stable as the
   // user filters; only the slice sizes change. Viewbox leaves margin around
   // the circle for thin slices' labels to sit outside with a leader line.
-  private readonly PIE_CENTER = 120;
-  private readonly PIE_RADIUS = 96;
+  // Card numbers are short (4 digits), so a tight margin fits; category
+  // names ("עירייה וממשלה") are much longer and the category chart can have
+  // many more thin slices at once (dominated by "לא מסווג"), so it gets a
+  // roomier coordinate space — same on-screen circle size (CSS controls
+  // that), just more internal units for long outside-label text to use
+  // before hitting the edge.
+  private readonly PIE_GEO = { center: 120, radius: 96 };
+  private readonly PIE_GEO_CATEGORY = { center: 170, radius: 110 };
 
-  private point(angleDeg: number, r: number): { x: number; y: number } {
+  private point(angleDeg: number, r: number, center: number): { x: number; y: number } {
     const rad = (angleDeg * Math.PI) / 180;
     return {
-      x: this.PIE_CENTER + r * Math.sin(rad),
-      y: this.PIE_CENTER - r * Math.cos(rad),
+      x: center + r * Math.sin(rad),
+      y: center - r * Math.cos(rad),
     };
   }
 
-  private arcPath(startAngle: number, endAngle: number): string {
-    const p1 = this.point(startAngle, this.PIE_RADIUS);
-    const p2 = this.point(endAngle, this.PIE_RADIUS);
+  private arcPath(startAngle: number, endAngle: number, center: number, radius: number): string {
+    const p1 = this.point(startAngle, radius, center);
+    const p2 = this.point(endAngle, radius, center);
     const largeArc = endAngle - startAngle > 180 ? 1 : 0;
-    return `M ${this.PIE_CENTER} ${this.PIE_CENTER} L ${p1.x} ${p1.y} A ${this.PIE_RADIUS} ${this.PIE_RADIUS} 0 ${largeArc} 1 ${p2.x} ${p2.y} Z`;
+    return `M ${center} ${center} L ${p1.x} ${p1.y} A ${radius} ${radius} 0 ${largeArc} 1 ${p2.x} ${p2.y} Z`;
   }
 
   // a label sitting inside a colored fill needs white-or-ink chosen by that
@@ -192,19 +239,40 @@ export class CardsComponent implements OnInit, AfterViewInit {
   }
 
   private buildChartData() {
+    this.chartSegments = this.buildPieSegments(
+      row => row.num, num => this.cardColor(num), this.PIE_GEO,
+      row => row.category !== this.EXCLUDED_FROM_TOTAL_CATEGORY
+    );
+    // the category pie is the one place reimbursements should still show up
+    // as their own slice, so no exclusion filter here
+    this.categoryChartSegments = this.buildPieSegments(
+      row => row.category || this.UNCATEGORIZED,
+      key => key === this.UNCATEGORIZED ? this.UNCATEGORIZED_COLOR : (this.categoryColors.get(key) || this.UNCATEGORIZED_COLOR),
+      this.PIE_GEO_CATEGORY
+    );
+  }
+
+  private buildPieSegments(
+    keyFn: (row: CardItem) => string,
+    colorFn: (key: string) => string,
+    geo: { center: number; radius: number },
+    includeRow: (row: CardItem) => boolean = () => true
+  ): PieSegment[] {
+    const { center, radius } = geo;
     const sums = new Map<string, number>();
     for (const row of this.cardsData.filteredData) {
-      sums.set(row.num, (sums.get(row.num) || 0) + row.amount);
+      if (!includeRow(row)) continue;
+      const key = keyFn(row);
+      sums.set(key, (sums.get(key) || 0) + row.amount);
     }
     const entries = Array.from(sums.entries())
       .filter(([, total]) => total > 0)
-      .map(([num, total]) => ({ num, total, color: this.cardColor(num) }))
+      .map(([num, total]) => ({ num, total, color: colorFn(num) }))
       .sort((a, b) => b.total - a.total);
 
     const sumTotal = entries.reduce((a, e) => a + e.total, 0);
     if (!entries.length || sumTotal <= 0) {
-      this.chartSegments = [];
-      return;
+      return [];
     }
 
     const gapDeg = entries.length > 1 ? 1.5 : 0;
@@ -216,7 +284,7 @@ export class CardsComponent implements OnInit, AfterViewInit {
       const endAngle = entries.length === 1 ? 359.99 : Math.max(startAngle, rawEnd - gapDeg);
       cumulative = rawEnd;
       const mid = (startAngle + endAngle) / 2;
-      const path = this.arcPath(startAngle, endAngle);
+      const path = this.arcPath(startAngle, endAngle, center, radius);
       // a slice this thin can't fit a two-line label inside without
       // overlapping its neighbors — give it an outside label on a leader
       // line instead of hiding it
@@ -232,9 +300,9 @@ export class CardsComponent implements OnInit, AfterViewInit {
     // around; the leader line's start stays pinned to the slice's true edge.
     const MIN_LABEL_GAP = 28;
     let prevLabelAngle: number | null = null;
-    this.chartSegments = built.map(({ e, path, inside, mid }) => {
+    return built.map(({ e, path, inside, mid }) => {
       if (inside) {
-        const labelPt = this.point(mid, this.PIE_RADIUS * 0.58);
+        const labelPt = this.point(mid, radius * 0.58, center);
         return {
           ...e, path, inside,
           labelX: labelPt.x, labelY: labelPt.y,
@@ -246,9 +314,9 @@ export class CardsComponent implements OnInit, AfterViewInit {
       const labelAngle = prevLabelAngle === null ? mid : Math.max(mid, prevLabelAngle + MIN_LABEL_GAP);
       prevLabelAngle = labelAngle;
 
-      const edgePt = this.point(mid, this.PIE_RADIUS);
-      const stubPt = this.point(labelAngle, this.PIE_RADIUS + 7);
-      const rightSide = stubPt.x >= this.PIE_CENTER;
+      const edgePt = this.point(mid, radius, center);
+      const stubPt = this.point(labelAngle, radius + 7, center);
+      const rightSide = stubPt.x >= center;
       const elbowPt = { x: stubPt.x + (rightSide ? 9 : -9), y: stubPt.y };
       return {
         ...e, path, inside,
@@ -306,10 +374,16 @@ export class CardsComponent implements OnInit, AfterViewInit {
     input.nativeElement.dispatchEvent(new Event('input'));
   }
 
-  previousMonth() {
-    this.setPreviousMonthFilter();
+  selectMonth(opt: { label: string; month?: number; year?: number; isFuture?: boolean }) {
+    if (opt.isFuture) {
+      this.setFutureOnlyFilter();
+    } else {
+      const { start, end } = this.cycleBoundsForStartMonth(opt.month!, opt.year!);
+      this.searchObj.dates.start = start;
+      this.searchObj.dates.end = end;
+      this.showingFuture = false;
+    }
     this.reflectDateFilterInputs();
-    this.showingFuture = false;
     this.applyFilter(JSON.stringify(this.searchObj));
   }
 
@@ -319,13 +393,22 @@ export class CardsComponent implements OnInit, AfterViewInit {
     this.searchObj.dates.end = end;
   }
 
+  // strictly future-dated transactions only — anything dated today or
+  // earlier is excluded, not just "from the current cycle's start onward"
+  private setFutureOnlyFilter() {
+    const tomorrow = new Date();
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    this.searchObj.dates.start = this.formatLocalDate(tomorrow);
+    this.searchObj.dates.end = '';
+    this.showingFuture = true;
+  }
+
   toggleFutureTransactions() {
     if (this.showingFuture) {
       this.setPreviousMonthFilter();
       this.showingFuture = false;
     } else {
-      this.searchObj.dates.end = '';
-      this.showingFuture = true;
+      this.setFutureOnlyFilter();
     }
     this.reflectDateFilterInputs();
     this.applyFilter(JSON.stringify(this.searchObj));
@@ -336,6 +419,9 @@ export class CardsComponent implements OnInit, AfterViewInit {
       this.searchObj.dates.start ? this.toDisplayDate(this.searchObj.dates.start) : '');
     this.setDateInputValue(this.endDateInput,
       this.searchObj.dates.end ? this.toDisplayDate(this.searchObj.dates.end) : '');
+    if (this.searchInput) {
+      this.searchInput.nativeElement.value = this.searchObj.wildcard;
+    }
   }
 
   private toDisplayDate(isoDate: string): string {
@@ -343,21 +429,26 @@ export class CardsComponent implements OnInit, AfterViewInit {
     return `${d}/${m}/${y}`;
   }
 
-  // the current billing cycle: starts on the 13th (this month if today is on
-  // or after the 15th, otherwise last month's), and always runs through the
-  // 14th of the following month — covering already-posted future-dated
-  // charges (e.g. installments) within the same cycle, not just "through today"
-  private getBillingCycleBounds(): { start: string; end: string } {
+  // the default/current billing cycle is always named after today's calendar
+  // month (cycles are named by their closing month — see cycleLabel), so its
+  // start month is always last month, regardless of which day of the month
+  // today is. E.g. any day in October defaults to the "October" cycle
+  // (13-Sep to 12-Oct), not a mid-month switch to "November".
+  private getCurrentCycleStartMonth(): { month: number; year: number } {
     const now = new Date();
-    let month = now.getMonth();
+    let month = now.getMonth() - 1;
     let year = now.getFullYear();
-    if (now.getDate() < 15) {
-      month -= 1;
-      if (month < 0) {
-        month = 11;
-        year -= 1;
-      }
+    if (month < 0) {
+      month = 11;
+      year -= 1;
     }
+    return { month, year };
+  }
+
+  // a cycle runs from the 13th of its start month through the 12th of the
+  // following month — exactly one calendar month, no overlap with the next
+  // cycle (which starts the very next day, the 13th)
+  private cycleBoundsForStartMonth(month: number, year: number): { start: string; end: string } {
     const start = this.formatLocalDate(new Date(year, month, 13));
     let endMonth = month + 1;
     let endYear = year;
@@ -365,8 +456,92 @@ export class CardsComponent implements OnInit, AfterViewInit {
       endMonth = 0;
       endYear += 1;
     }
-    const end = this.formatLocalDate(new Date(endYear, endMonth, 14));
+    const end = this.formatLocalDate(new Date(endYear, endMonth, 12));
     return { start, end };
+  }
+
+  private getBillingCycleBounds(): { start: string; end: string } {
+    const { month, year } = this.getCurrentCycleStartMonth();
+    return this.cycleBoundsForStartMonth(month, year);
+  }
+
+  private readonly MONTH_NAMES = [
+    'January', 'February', 'March', 'April', 'May', 'June',
+    'July', 'August', 'September', 'October', 'November', 'December',
+  ];
+
+  monthOptions: { label: string; month?: number; year?: number; isFuture?: boolean }[] = [];
+
+  // the card company names a cycle by the month it closes in, not the month
+  // it starts in — a 13-Sep-to-12-Oct cycle is "the October cycle"
+  private cycleLabel(startMonth: number, startYear: number): string {
+    let endMonth = startMonth + 1;
+    let endYear = startYear;
+    if (endMonth > 11) {
+      endMonth = 0;
+      endYear += 1;
+    }
+    return `${this.MONTH_NAMES[endMonth]} ${endYear}`;
+  }
+
+  private buildMonthOptions(count = 12) {
+    let { month, year } = this.getCurrentCycleStartMonth();
+    const options: { label: string; month?: number; year?: number; isFuture?: boolean }[] = [
+      { label: 'Future transactions', isFuture: true },
+    ];
+    for (let i = 0; i < count; i++) {
+      options.push({ label: this.cycleLabel(month, year), month, year });
+      month -= 1;
+      if (month < 0) {
+        month = 11;
+        year -= 1;
+      }
+    }
+    this.monthOptions = options;
+  }
+
+  monthlyTotals: { label: string; total: number; heightPct: number; color: string }[] = [];
+
+  private buildMonthlyTotals(cards: CardItem[], maxBars = 12) {
+    const sums = new Map<string, number>();
+    const labels = new Map<string, string>();
+    for (const row of cards) {
+      if (row.category === this.EXCLUDED_FROM_TOTAL_CATEGORY) continue;
+      const d = new Date(row.date);
+      let month = d.getMonth();
+      let year = d.getFullYear();
+      if (d.getDate() < 13) {
+        month -= 1;
+        if (month < 0) {
+          month = 11;
+          year -= 1;
+        }
+      }
+      let endMonth = month + 1;
+      let endYear = year;
+      if (endMonth > 11) {
+        endMonth = 0;
+        endYear += 1;
+      }
+      const key = `${endYear}-${String(endMonth + 1).padStart(2, '0')}`;
+      sums.set(key, (sums.get(key) || 0) + row.amount);
+      if (!labels.has(key)) {
+        labels.set(key, `${this.MONTH_NAMES[endMonth].slice(0, 3)}'${String(endYear).slice(-2)}`);
+      }
+    }
+
+    const recentKeys = Array.from(sums.keys()).sort().slice(-maxBars);
+    const maxTotal = Math.max(...recentKeys.map(k => sums.get(k)!), 1);
+    // a sequential ramp (one hue, light-to-dark), not arbitrary categorical
+    // colors — the bars are a chronological series, not independent
+    // categories, so color should encode "earlier vs later", oldest lightest
+    const n = Math.max(recentKeys.length - 1, 1);
+    this.monthlyTotals = recentKeys.map((k, i) => ({
+      label: labels.get(k)!,
+      total: sums.get(k)!,
+      heightPct: Math.max(2, (sums.get(k)! / maxTotal) * 100),
+      color: `hsl(212, 65%, ${72 - (i / n) * 35}%)`,
+    }));
   }
 
   private formatLocalDate(d: Date): string {
@@ -389,6 +564,35 @@ export class CardsComponent implements OnInit, AfterViewInit {
   applyFilter(filter: string) {
     this.cardsData.filter = filter;
     this.calculateTotal();
+    this.saveFilterState();
+  }
+
+  private readonly FILTER_STORAGE_KEY = 'cardsFilterState';
+
+  // sessionStorage, not localStorage — "keep it across a refresh" scoped to
+  // this tab/session, not "remember forever" across separate visits
+  private saveFilterState() {
+    try {
+      sessionStorage.setItem(this.FILTER_STORAGE_KEY, JSON.stringify({
+        searchObj: this.searchObj,
+        showingFuture: this.showingFuture,
+      }));
+    } catch {
+      // private browsing / storage disabled — just skip persistence
+    }
+  }
+
+  private restoreFilterState(): boolean {
+    try {
+      const raw = sessionStorage.getItem(this.FILTER_STORAGE_KEY);
+      if (!raw) return false;
+      const { searchObj, showingFuture } = JSON.parse(raw);
+      this.searchObj = searchObj;
+      this.showingFuture = !!showingFuture;
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   setFilter() {
@@ -404,11 +608,14 @@ export class CardsComponent implements OnInit, AfterViewInit {
       }
       const search = cachedSearch;
       const wc = search.wildcard.toLowerCase();
+      // desc/memo can be null in the DB (confirmed: at least one stored row
+      // has memo === null) — .toLowerCase() on null throws, which silently
+      // breaks the whole filter operation, not just that one row
       const matchSearch = wc === '' ||
-        data.num.toLowerCase().includes(wc) ||
-        data.date.toLowerCase().includes(wc) ||
-        data.desc.toLowerCase().includes(wc) ||
-        data.memo.toLowerCase().includes(wc) ||
+        (data.num || '').toLowerCase().includes(wc) ||
+        (data.date || '').toLowerCase().includes(wc) ||
+        (data.desc || '').toLowerCase().includes(wc) ||
+        (data.memo || '').toLowerCase().includes(wc) ||
         String(data.amount).includes(wc) ||
         String(data.originalAmount).includes(wc);
       const matchCards = search.cards.includes(data.num);
@@ -439,9 +646,60 @@ export class CardsComponent implements OnInit, AfterViewInit {
   tableToCSV(): string {
     let csvData = [[...this.headers]];
     this.cardsData.data.forEach(rowObj => {
-      csvData.push(Object.values(rowObj));
+      // was Object.values(rowObj) — relied on the object's own key order
+      // matching headers exactly, which broke once CardItem gained fields
+      // (identifier) that aren't displayed/exported columns
+      csvData.push(this.displayedColumns.map(col => (rowObj as any)[col]));
     });
     return csvData.join('\n');
+  }
+
+  private normalizeDesc(s: string): string {
+    return (s || '').trim().replace(/\s+/g, ' ').toLowerCase();
+  }
+
+  updateCategory(row: CardItem, category: string) {
+    const target = this.normalizeDesc(row.desc);
+    const otherRows = this.cardsData.data.filter(r => r !== row);
+    const hasMatchingDesc = otherRows.some(r => this.normalizeDesc(r.desc) === target);
+
+    // the same merchant can serve two different real purposes (e.g. a
+    // supermarket run for home vs. a work-reimbursed purchase) — don't
+    // silently recategorize everything sharing this description unless asked
+    if (hasMatchingDesc) {
+      this.dialog.open(ConfirmCategoryDialogComponent, {
+        data: { desc: row.desc, amount: row.amount, num: row.num, otherRows },
+        width: '420px',
+      }).afterClosed().subscribe((result: ConfirmCategoryDialogResult | undefined) => {
+        // dismissed (backdrop/escape) without choosing — do nothing
+        if (result === undefined) return;
+        this.applyCategory(row, category, result);
+      });
+    } else {
+      this.applyCategory(row, category, { applyToAll: false, sameAmount: false, sameCard: false });
+    }
+  }
+
+  private applyCategory(row: CardItem, category: string, { applyToAll, sameAmount, sameCard }: ConfirmCategoryDialogResult) {
+    const previous = row.category;
+    row.category = category; // optimistic, for instant feedback on the row just clicked
+    const onDone = {
+      // other rows may have been updated server-side too — reload so the
+      // whole table reflects it, not just this row
+      next: () => this.loadHistory(),
+      error: (err: any) => {
+        console.error('updateCategory failed:', err);
+        row.category = previous;
+      }
+    };
+    if (applyToAll) {
+      const criteria: { desc: string; amount?: number; num?: string } = { desc: row.desc };
+      if (sameAmount) criteria.amount = row.amount;
+      if (sameCard) criteria.num = row.num;
+      this.cardService.setCategoryByCriteria(criteria, category).subscribe(onDone);
+    } else {
+      this.cardService.setCategory(row.num, row.identifier, category).subscribe(onDone);
+    }
   }
 
 }

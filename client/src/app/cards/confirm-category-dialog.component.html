@@ -1,0 +1,13 @@
+<h2 mat-dialog-title dir="rtl">עדכון קטגוריה</h2>
+<mat-dialog-content dir="rtl">
+  <p class="desc-preview">"{{data.desc}}"</p>
+  <div class="criteria">
+    <mat-checkbox [(ngModel)]="sameAmount">אותו מחיר</mat-checkbox>
+    <mat-checkbox [(ngModel)]="sameCard">אותו כרטיס</mat-checkbox>
+  </div>
+  <p><strong>{{matchCount}}</strong> עסקאות נוספות תואמות</p>
+</mat-dialog-content>
+<mat-dialog-actions align="end" dir="rtl">
+  <button mat-button (click)="choose(false)">רק זו</button>
+  <button mat-flat-button color="primary" [disabled]="matchCount === 0" (click)="choose(true)">החל על כל ה-{{matchCount + 1}}</button>
+</mat-dialog-actions>

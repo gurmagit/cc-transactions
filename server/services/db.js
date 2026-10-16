@@ -31,10 +31,28 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_balance_num ON balance_snapshots(num);
 `)
 
+// category/originalCurrency/category_source were added after the table
+// already had rows — CREATE TABLE IF NOT EXISTS won't retrofit a column onto
+// an existing table, so migrate by hand
+for (const col of ['category', 'originalCurrency', 'category_source']) {
+  const has = db.prepare("SELECT 1 FROM pragma_table_info('transactions') WHERE name = ?").get(col)
+  if (!has) {
+    db.exec(`ALTER TABLE transactions ADD COLUMN ${col} TEXT`)
+  }
+}
+
+// a real upsert, not INSERT OR REPLACE — category is deliberately left out of
+// the DO UPDATE SET so a re-scrape of an existing transaction never clobbers
+// an LLM-assigned or manually-set category. originalCurrency, like the other
+// scraped fields, is fine to overwrite on every re-scrape.
 const upsertStmt = db.prepare(`
-  INSERT OR REPLACE INTO transactions
-    (num, identifier, date, amount, originalAmount, desc, memo, scraped_at)
-  VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+  INSERT INTO transactions
+    (num, identifier, date, amount, originalAmount, desc, memo, scraped_at, category, originalCurrency)
+  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  ON CONFLICT(num, identifier) DO UPDATE SET
+    date=excluded.date, amount=excluded.amount, originalAmount=excluded.originalAmount,
+    desc=excluded.desc, memo=excluded.memo, scraped_at=excluded.scraped_at,
+    originalCurrency=excluded.originalCurrency
 `)
 
 const insertBalanceStmt = db.prepare(`
@@ -43,8 +61,31 @@ const insertBalanceStmt = db.prepare(`
 `)
 
 const selectAllStmt = db.prepare(
-  'SELECT num, date, amount, originalAmount, desc, memo FROM transactions ORDER BY date DESC'
+  'SELECT num, identifier, date, amount, originalAmount, desc, memo, category, originalCurrency FROM transactions ORDER BY date DESC'
 )
+const selectUncategorizedStmt = db.prepare(
+  'SELECT num, identifier, desc, memo, amount FROM transactions WHERE category IS NULL'
+)
+const setCategoryStmt = db.prepare(
+  'UPDATE transactions SET category = ?, category_source = ? WHERE num = ? AND identifier = ?'
+)
+const selectDescsStmt = db.prepare('SELECT num, identifier, desc, amount FROM transactions')
+// one example per distinct merchant (by normalized desc), most recent first —
+// avoids flooding the prompt with 50 near-identical grocery-store rows. The
+// correlated subquery (not a bare GROUP BY) is what makes "most recent"
+// deterministic — SQLite doesn't guarantee which row's other columns a bare
+// GROUP BY picks.
+const selectManualExamplesStmt = db.prepare(`
+  SELECT desc, memo, amount, category FROM transactions t
+  WHERE category_source = 'manual'
+    AND scraped_at = (
+      SELECT MAX(scraped_at) FROM transactions t2
+      WHERE LOWER(TRIM(t2.desc)) = LOWER(TRIM(t.desc)) AND t2.category_source = 'manual'
+    )
+  GROUP BY LOWER(TRIM(desc))
+  ORDER BY scraped_at DESC
+  LIMIT ?
+`)
 const existsStmt = db.prepare('SELECT 1 FROM transactions WHERE num = ? AND identifier = ?')
 const sameAmountStmt = db.prepare('SELECT identifier, date, desc, memo FROM transactions WHERE num = ? AND amount = ?')
 
@@ -94,7 +135,7 @@ function findFuzzyDuplicate(txn) {
 
 function upsertTransactions(txns) {
   const now = new Date().toISOString()
-  let skipped = 0
+  let refreshed = 0
   for (const txn of txns) {
     const identifier = txn.identifier != null ? String(txn.identifier) : fallbackIdentifier(txn)
     if (txn.identifier == null) {
@@ -107,27 +148,37 @@ function upsertTransactions(txns) {
 
     // only worth checking for a fuzzy duplicate if this isn't already a known
     // row — an exact (num, identifier) match is just a normal update
+    let targetIdentifier = identifier
     if (!existsStmt.get(txn.num, identifier)) {
       const dup = findFuzzyDuplicate(txn)
       if (dup) {
-        skipped++
-        continue
+        // same real transaction, but this source assigned it a different
+        // identifier than what's stored (seen with foreign-currency
+        // transactions, where the library can flip between its inbound and
+        // outbound voucher-number fields across scrapes) — refresh the
+        // existing row under its original identifier instead of silently
+        // discarding data (which meant a field added after a row's first
+        // capture, like originalCurrency, could never backfill onto it)
+        targetIdentifier = dup.identifier
+        refreshed++
       }
     }
 
     upsertStmt.run(
       txn.num,
-      identifier,
+      targetIdentifier,
       txn.date,
       txn.amount,
       txn.originalAmount,
       txn.desc ?? null,
       txn.memo ?? null,
-      now
+      now,
+      txn.category ?? null,
+      txn.originalCurrency ?? null
     )
   }
-  if (skipped) {
-    console.log(`skipped ${skipped} duplicate transaction(s)`)
+  if (refreshed) {
+    console.log(`refreshed ${refreshed} transaction(s) matched by content (identifier differed from stored)`)
   }
 }
 
@@ -145,4 +196,47 @@ function getAllTransactions() {
   return selectAllStmt.all()
 }
 
-module.exports = { upsertTransactions, insertBalanceSnapshot, getAllTransactions }
+function getUncategorized() {
+  return selectUncategorizedStmt.all()
+}
+
+// manual = the user picked it in the UI — the ground truth used as few-shot
+// examples for future LLM categorization. llm = the model guessed it.
+function setCategory(num, identifier, category, source = 'manual') {
+  setCategoryStmt.run(category, source, num, identifier)
+}
+
+function setCategories(updates, source = 'llm') {
+  for (const { num, identifier, category } of updates) {
+    setCategoryStmt.run(category, source, num, identifier)
+  }
+}
+
+// bulk category update — always matches by description (normalized, since a
+// recurring merchant can appear under slightly different desc text depending
+// on which source scraped it: trailing whitespace, quote-character variants
+// — the same cases normalizeText already handles for dedup), optionally
+// narrowed further by amount and/or card number, per the confirm dialog's checkboxes
+function setCategoryByCriteria({ desc, amount, num, category }) {
+  const targetDesc = normalizeText(desc)
+  const rows = selectDescsStmt.all()
+  let count = 0
+  for (const r of rows) {
+    if (normalizeText(r.desc) !== targetDesc) continue
+    if (amount != null && r.amount !== amount) continue
+    if (num != null && r.num !== num) continue
+    setCategoryStmt.run(category, 'manual', r.num, r.identifier)
+    count++
+  }
+  return count
+}
+
+function getManualCategoryExamples(limit = 40) {
+  return selectManualExamplesStmt.all(limit)
+}
+
+module.exports = {
+  upsertTransactions, insertBalanceSnapshot, getAllTransactions,
+  getUncategorized, setCategory, setCategories, setCategoryByCriteria,
+  getManualCategoryExamples,
+}

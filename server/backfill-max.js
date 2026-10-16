@@ -1,6 +1,6 @@
 // Standalone script — not part of the app. Run manually when you want to pull
-// older history for Max (Isracard history is handled by the dedicated
-// backfill-isracard-*.js scripts instead, to avoid re-triggering that path):
+// older history for Max (regular Isracard cards use backfill-isracard.js,
+// card 3802 uses backfill-amex.js — each source needs its own script):
 //   node backfill-max.js [days]
 // Defaults to 365 days back. Writes straight to the db (same path data.js uses).
 const { dataService } = require('./services/data')

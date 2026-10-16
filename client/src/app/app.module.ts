@@ -1,5 +1,6 @@
 import { AppComponent } from './app.component';
 import { CardsComponent } from './cards/cards.component';
+import { ConfirmCategoryDialogComponent } from './cards/confirm-category-dialog.component';
 
 import { NgModule } from '@angular/core';
 import { BrowserModule } from '@angular/platform-browser';
@@ -22,12 +23,14 @@ import { MatCheckboxModule } from '@angular/material/checkbox';
 import { MatDatepickerModule } from '@angular/material/datepicker';
 import { MatNativeDateModule, MAT_DATE_LOCALE } from '@angular/material/core'
 import { MatTooltipModule } from '@angular/material/tooltip';
+import { MatDialogModule } from '@angular/material/dialog';
 import { FlexLayoutModule } from '@angular/flex-layout';
 
 @NgModule({
   declarations: [
     AppComponent,
-    CardsComponent
+    CardsComponent,
+    ConfirmCategoryDialogComponent
   ],
   imports: [
     BrowserModule,
@@ -51,6 +54,7 @@ import { FlexLayoutModule } from '@angular/flex-layout';
     MatDatepickerModule,
     MatNativeDateModule,
     MatTooltipModule,
+    MatDialogModule,
     FlexLayoutModule
   ],
   providers: [

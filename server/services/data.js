@@ -6,21 +6,18 @@ const sleep = ms => new Promise(r => setTimeout(r, ms))
 
 class DataService {
   async fetchData(days, months = 1, companyFilter = null) {
-    if (days < 31) {
-      const d = new Date()
-      const day_of_month = d.getDate()
-      if (day_of_month < 13) {
-        days = day_of_month + 20
-      } else {
-        days = day_of_month - 12
-      }
-    }
     const startDate = new Date(Date.now() - days * 86400000)
     const result = { data: [], errors: [] }
     const data = this.buildOptions(startDate, months, companyFilter)
-    const results = await Promise.allSettled(
-      data.map(obj =>
-        this.withRetry(async () => {
+    // sequential, not Promise.allSettled — confirmed directly: scraping both
+    // Isracard logins (different accounts, same provider) concurrently got
+    // the second one blocked with a 429 "Automation detected", while running
+    // alone it succeeds. Isracard's bot-detection evidently looks at
+    // concurrent traffic to the site as a whole, not just per-account.
+    const results = []
+    for (const obj of data) {
+      try {
+        const accounts = await this.withRetry(async () => {
           const scraper = createScraper(obj.option)
           obj.credentials.password = ['000000', '000000'].includes(obj.credentials.card6Digits)
             ? process.env.PASSWORD2
@@ -37,8 +34,11 @@ class DataService {
           }
           return scrapeResult.accounts || []
         }, { retries: 2 })
-      )
-    )
+        results.push({ status: 'fulfilled', value: accounts })
+      } catch (reason) {
+        results.push({ status: 'rejected', reason })
+      }
+    }
 
     results.forEach((r, i) => {
       if (r.status === 'fulfilled') {
@@ -57,7 +57,7 @@ class DataService {
             console.log('no transactions:', num)
             return
           }
-          console.log('card number:', num)
+          console.log(`card number: ${num}, transactions: ${account.txns.length}`)
           account.txns.forEach(txn => {
             const amount = sign * txn.chargedAmount
             const orig = sign * txn.originalAmount
@@ -67,6 +67,7 @@ class DataService {
               date: txn.date.slice(0, 10),
               amount,
               originalAmount: orig,
+              originalCurrency: txn.originalCurrency,
               desc: txn.description,
               memo: txn.memo,
             })
@@ -134,9 +135,9 @@ class DataService {
         lastError = err
         onFail?.(err, i)
         if (i < retries) {
-          // a 429/"automation detected" response means the server wants us
-          // to back off much longer, not retry at the normal quick pace
-          const isRateLimited = /429|automation detected/i.test(err.message || '')
+          // a 429/403/"automation detected" response means the server wants
+          // us to back off much longer, not retry at the normal quick pace
+          const isRateLimited = /429|403|automation detected/i.test(err.message || '')
           await sleep(isRateLimited ? rateLimitDelay : delay)
         }
       }

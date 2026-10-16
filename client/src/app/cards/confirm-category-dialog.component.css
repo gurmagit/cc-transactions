@@ -1,0 +1,14 @@
+.desc-preview {
+  color: #52514e;
+  font-style: italic;
+  padding: 4px 8px;
+  background: #f9f9f7;
+  border-radius: 4px;
+  word-break: break-word;
+}
+
+.criteria {
+  display: flex;
+  gap: 16px;
+  margin: 10px 0;
+}

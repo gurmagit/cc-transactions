@@ -55,4 +55,23 @@ export class CardService {
     const uniques = [...new Set(data.map((elem: CardItem) => elem.num.toString()))];
     this.cardNumbers$.next(uniques);
   }
+
+  // bulk-updates every transaction with a matching description (always),
+  // optionally narrowed by amount and/or card number — whichever the user
+  // checked in the confirm dialog
+  setCategoryByCriteria(criteria: { desc: string; amount?: number; num?: string }, category: string): Observable<{ updated: number }> {
+    return this.http.patch<{ updated: number }>(
+      `${this.url}/transactions/bulk-category`,
+      { ...criteria, category }
+    );
+  }
+
+  // same merchant, different real purpose (e.g. groceries bought for home
+  // vs. work) — updates just this one row
+  setCategory(num: string, identifier: string, category: string): Observable<void> {
+    return this.http.patch<void>(
+      `${this.url}/transactions/${num}/${encodeURIComponent(identifier)}`,
+      { category }
+    );
+  }
 }

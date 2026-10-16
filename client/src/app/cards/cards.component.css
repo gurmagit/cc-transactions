@@ -53,6 +53,21 @@ mat-checkbox {
   min-width: 0 !important;
 }
 
+/* the dropdown panel's width is tied to the trigger's — and the trigger is
+   deliberately narrow/auto-fit above, so when few cards are checked the
+   panel shrinks with it and the full card list wraps/scrolls cramped.
+   Same fix as the category dropdown: force the panel (and its outer CDK
+   overlay wrapper, a different element entirely) to size to its own content. */
+::ng-deep .cdk-overlay-pane:has(.select-cards-panel) {
+  width: max-content !important;
+  max-width: none !important;
+}
+
+::ng-deep .select-cards-panel {
+  width: max-content !important;
+  max-width: none !important;
+}
+
 .search {
   width: 15%;
   float: left;
@@ -62,6 +77,11 @@ mat-checkbox {
   width: 20%;
   min-width: 260px;
   float: left;
+}
+
+.month-select {
+  width: auto;
+  min-width: 140px;
 }
 
 #link {
@@ -108,10 +128,21 @@ mat-checkbox {
 }
 
 .chart-total {
-  margin-top: 10px;
+  margin: 5px 0 0;
   text-align: center;
   font-weight: 600;
   color: #0b0b0b;
+}
+
+/* each pie's own viewBox reserves blank margin around the circle for
+   outside-slice labels — that reserved space, not the margin between
+   elements, is what makes the gap look big. Negative margin crops into it. */
+.pie:not(.pie-secondary) {
+  margin-bottom: -20px;
+}
+
+.pie-secondary {
+  margin-top: -35px;
 }
 
 .pie-label-num {
@@ -132,6 +163,70 @@ mat-checkbox {
   stroke-width: 1;
 }
 
+/* the pie above has its own large reserved internal margin (viewBox space
+   for outside labels) — same situation as the gap between the two pies,
+   so a small positive margin barely moves the visible gap. Negative margin
+   crops into that reserved space directly. */
+.bar-chart {
+  margin-top: -50px;
+}
+
+.bars {
+  display: flex;
+  align-items: flex-end;
+  gap: 4px;
+}
+
+.bar-col {
+  flex: 1 1 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-end;
+  min-width: 0;
+  position: relative;
+}
+
+/* horizontal, not rotated — alternating bars sit on a second, higher line
+   (.bar-value-high) so a label's real neighbors are two columns away, not
+   one, giving it roughly double the horizontal room before colliding.
+   overflow is allowed (no max-width/ellipsis) so the full number always shows. */
+.bar-value {
+  font-size: 0.6rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: #52514e;
+  white-space: nowrap;
+  margin-bottom: 0;
+}
+
+.bar-value-high {
+  margin-bottom: 9px;
+}
+
+/* fixed height so the staggered label above doesn't affect the bar's own
+   height:X% calculation — that's resolved against this track, not the
+   whole column */
+.bar-track {
+  width: 100%;
+  height: 90px;
+  display: flex;
+  align-items: flex-end;
+}
+
+.bar {
+  width: 100%;
+  border-radius: 2px 2px 0 0;
+  min-height: 2px;
+}
+
+.bar-label {
+  font-size: 0.6rem;
+  font-weight: 700;
+  color: #898781;
+  margin-top: 3px;
+}
+
 .sticky {
   background-color: #def3f7 !important;
   top: 0;
@@ -145,9 +240,9 @@ table tr:last-child td {
 
 .cards-table h3 {
   background-color: lightpink;
-  float: left;
   font-size: large;
   font-weight: 500;
+  margin: 0 0 8px;
 }
 
 .mat-mdc-row {
@@ -167,4 +262,50 @@ table tr:last-child td {
   white-space: nowrap !important;
   padding: 0 4px !important;
   width: auto !important;
+}
+
+::ng-deep th.mat-mdc-header-cell {
+  font-size: 15px !important;
+}
+
+::ng-deep .mat-mdc-header-row {
+  height: 32px !important;
+}
+
+.category-select {
+  font: inherit;
+  min-width: 90px;
+}
+
+::ng-deep .category-select .mat-mdc-select-value-text,
+::ng-deep .category-select .mat-mdc-select-trigger {
+  font: inherit;
+}
+
+/* the opened dropdown is a CDK overlay portaled to document.body, not a
+   descendant of .category-select in the DOM — panelClass is the only way
+   to target it. Two Material elements fight us here: the inner panel's own
+   width:100% rule (beaten by !important below), and the *outer* overlay
+   pane's width, which Material sets via an inline style based on the
+   trigger's width — :has() lets us reach that sibling-ish ancestor without
+   touching every overlay pane in the app. */
+::ng-deep .cdk-overlay-pane:has(.category-select-panel) {
+  width: max-content !important;
+  max-width: none !important;
+}
+
+::ng-deep .category-select-panel {
+  width: max-content !important;
+  max-width: none !important;
+}
+
+::ng-deep .category-select-panel .mat-mdc-option {
+  font-size: 0.8rem !important;
+  min-height: 32px;
+  white-space: nowrap !important;
+}
+
+::ng-deep .category-select-panel .mdc-list-item__primary-text {
+  font-size: inherit !important;
+  white-space: nowrap !important;
 }

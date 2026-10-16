@@ -3,8 +3,11 @@
 // Regular Isracard cards are handled by the library/Submit as normal — this
 // is only needed for the one card the library can't reach.
 require('dotenv').config()
-const puppeteer = require('puppeteer')
 const db = require('./db')
+const puppeteer = require('puppeteer')
+// const puppeteer = require('puppeteer-extra');
+// const StealthPlugin = require('puppeteer-extra-plugin-stealth');
+// puppeteer.use(StealthPlugin());
 
 const sleep = ms => new Promise(r => setTimeout(r, ms))
 const AMEX_CARD_SUFFIX = '3802'
@@ -137,6 +140,10 @@ async function backfillAmexCard({ monthsBack = 2, headless = false } = {}) {
       date: toIsoDate(v.purchaseDate),
       amount: v.billingAmount,
       originalAmount: v.originalAmount,
+      // for some voucher types (e.g. card-fee line items) this raw field
+      // isn't a real currency code — seen literally "0.0" for plain
+      // domestic ILS charges. Only trust it if it looks like one.
+      originalCurrency: /^[A-Z]{3}$/.test(v.originalCurrency) ? v.originalCurrency : 'ILS',
       desc: v.businessName || v.transactionDescription || '',
       memo: (v.moreInfo || '').trim(),
     }))
