@@ -28,10 +28,9 @@ export class CardsComponent implements OnInit, AfterViewInit {
     'ביגוד', 'בילויים', 'סופר', 'בריאות ושיניים', 'ביטוח', 'תחבורה',
     'עירייה וממשלה', 'תקשורת', 'חשבונות בית', 'טיפוח וכושר', 'חיות מחמד', 'חצר וגינה', 'החזרים', 'חופשה', 'שונות',
   ];
-  // reimbursements aren't real spending — exclude them from every total
-  // (grand total, per-card pie, monthly bar chart), but the category pie
-  // still needs to show the slice so the user can see how much came back
-  private readonly EXCLUDED_FROM_TOTAL_CATEGORY = 'החזרים';
+  // reimbursements count toward every total like any other transaction, but
+  // get a lighter row color in the table so they're still visually called out
+  readonly REIMBURSEMENT_CATEGORY = 'החזרים';
   cardsData!: MatTableDataSource<CardItem>;
   private _sort?: MatSort;
   @ViewChild(MatSort) set sort(sort: MatSort | undefined) {
@@ -86,13 +85,15 @@ export class CardsComponent implements OnInit, AfterViewInit {
     this.fetchErrors$ = this.cardService.fetchErrors$;
   }
 
+  // a genuinely new session (no saved filter) needs its default cycle
+  // picked only once real data has loaded — see hasRealDataForNextCycle
+  private needsDefaultCycle = false;
+
   ngOnInit(): void {
     // a page refresh should keep whatever the user was looking at, not
     // reset to the default billing cycle — only genuinely new sessions
     // (no saved state yet) get the default
-    if (!this.restoreFilterState()) {
-      this.setPreviousMonthFilter();
-    }
+    this.needsDefaultCycle = !this.restoreFilterState();
     this.buildMonthOptions();
     this.loadHistory();
   }
@@ -162,7 +163,7 @@ export class CardsComponent implements OnInit, AfterViewInit {
       // filter (see restoreFilterState) lands here on a fresh component
       // instance where selectedCards$ was never populated at all
       setTimeout(() => this.selectedCards$.next([...this.searchObj.cards]));
-      this.selectAllChkBox = this.searchObj.cards.length === this.allCards.length;
+      this.syncSelectAllChkBox();
     }
     if (cards.length) {
       this.start_date = new Date(Math.min(...cards.map((c: CardItem) =>
@@ -174,12 +175,16 @@ export class CardsComponent implements OnInit, AfterViewInit {
     // single cycle the pies are scoped to, so this only needs recomputing
     // when the underlying data changes, not on every filter tweak
     this.buildMonthlyTotals(cards);
+    if (this.needsDefaultCycle) {
+      this.needsDefaultCycle = false;
+      this.setPreviousMonthFilter(cards);
+      this.reflectDateFilterInputs();
+    }
     this.applyFilter(JSON.stringify(this.searchObj));
   }
 
   calculateTotal() {
     this.totalCost = this.cardsData.filteredData
-      .filter((v: CardItem) => v.category !== this.EXCLUDED_FROM_TOTAL_CATEGORY)
       .reduce((a: number, v: CardItem) => a + v.amount, 0);
     this.buildChartData();
   }
@@ -240,11 +245,8 @@ export class CardsComponent implements OnInit, AfterViewInit {
 
   private buildChartData() {
     this.chartSegments = this.buildPieSegments(
-      row => row.num, num => this.cardColor(num), this.PIE_GEO,
-      row => row.category !== this.EXCLUDED_FROM_TOTAL_CATEGORY
+      row => row.num, num => this.cardColor(num), this.PIE_GEO
     );
-    // the category pie is the one place reimbursements should still show up
-    // as their own slice, so no exclusion filter here
     this.categoryChartSegments = this.buildPieSegments(
       row => row.category || this.UNCATEGORIZED,
       key => key === this.UNCATEGORIZED ? this.UNCATEGORIZED_COLOR : (this.categoryColors.get(key) || this.UNCATEGORIZED_COLOR),
@@ -255,13 +257,11 @@ export class CardsComponent implements OnInit, AfterViewInit {
   private buildPieSegments(
     keyFn: (row: CardItem) => string,
     colorFn: (key: string) => string,
-    geo: { center: number; radius: number },
-    includeRow: (row: CardItem) => boolean = () => true
+    geo: { center: number; radius: number }
   ): PieSegment[] {
     const { center, radius } = geo;
     const sums = new Map<string, number>();
     for (const row of this.cardsData.filteredData) {
-      if (!includeRow(row)) continue;
       const key = keyFn(row);
       sums.set(key, (sums.get(key) || 0) + row.amount);
     }
@@ -341,10 +341,18 @@ export class CardsComponent implements OnInit, AfterViewInit {
 
   updateSelected(e: string[]) {
     this.selectedCards$.next(e);
-    this.selectAllChkBox = (this.selectedCards$.value.length === this.allCards.length)
     console.log('e:', e, this.searchObj);
     this.searchObj.cards = e;
+    this.syncSelectAllChkBox();
     this.applyFilter(JSON.stringify(this.searchObj));
+  }
+
+  // a raw length comparison breaks if a card drops out of allCards (e.g. its
+  // scrape failed this round) while still sitting in searchObj.cards — check
+  // should still be checked whenever every *currently available* card is selected
+  private syncSelectAllChkBox() {
+    this.selectAllChkBox = this.allCards.length > 0 &&
+      this.allCards.every((c: string) => this.searchObj.cards.includes(c));
   }
 
   searchFilter(e: any) {
@@ -387,8 +395,8 @@ export class CardsComponent implements OnInit, AfterViewInit {
     this.applyFilter(JSON.stringify(this.searchObj));
   }
 
-  private setPreviousMonthFilter() {
-    const { start, end } = this.getBillingCycleBounds();
+  private setPreviousMonthFilter(cards: CardItem[] = this.cardsData?.data || []) {
+    const { start, end } = this.getBillingCycleBounds(cards);
     this.searchObj.dates.start = start;
     this.searchObj.dates.end = end;
   }
@@ -429,18 +437,59 @@ export class CardsComponent implements OnInit, AfterViewInit {
     return `${d}/${m}/${y}`;
   }
 
-  // the default/current billing cycle is always named after today's calendar
-  // month (cycles are named by their closing month — see cycleLabel), so its
-  // start month is always last month, regardless of which day of the month
-  // today is. E.g. any day in October defaults to the "October" cycle
-  // (13-Sep to 12-Oct), not a mid-month switch to "November".
-  private getCurrentCycleStartMonth(): { month: number; year: number } {
+  // the default billing cycle is normally named after today's calendar month
+  // (cycles are named by their closing month — see cycleLabel), e.g. any day
+  // in October defaults to the "October" cycle (13-Sep to 12-Oct) — *unless*
+  // real transactions have already posted into the next cycle's window (see
+  // hasRealDataForNextCycle), which means the statement has actually started
+  // and the default should follow it instead of staying pinned to last month.
+  private getCurrentCycleStartMonth(cards: CardItem[] = []): { month: number; year: number } {
     const now = new Date();
     let month = now.getMonth() - 1;
     let year = now.getFullYear();
     if (month < 0) {
       month = 11;
       year -= 1;
+    }
+    if (this.hasRealDataForNextCycle(cards)) {
+      month += 1;
+      if (month > 11) {
+        month = 0;
+        year += 1;
+      }
+    }
+    return { month, year };
+  }
+
+  // true once an actual (non-future) transaction has landed on or after the
+  // 13th of this calendar month — the start of the next-named cycle's window.
+  // Before the 13th this range is empty by construction, so no explicit
+  // day-of-month check is needed; guards against far-future installment rows
+  // (scrapers can return those months ahead) counting as "real" activity.
+  private hasRealDataForNextCycle(cards: CardItem[]): boolean {
+    const today = new Date();
+    const cutoverStr = this.formatLocalDate(new Date(today.getFullYear(), today.getMonth(), 13));
+    const todayStr = this.formatLocalDate(today);
+    return cards.some((c: CardItem) => c.date >= cutoverStr && c.date <= todayStr);
+  }
+
+  // the dropdown list offers the next cycle as soon as it's conceptually
+  // valid (we've passed the 13th), even before any real transaction has
+  // posted to it — unlike the default selection above, which waits for data
+  private getListAnchorMonth(): { month: number; year: number } {
+    const now = new Date();
+    let month = now.getMonth() - 1;
+    let year = now.getFullYear();
+    if (month < 0) {
+      month = 11;
+      year -= 1;
+    }
+    if (now.getDate() >= 13) {
+      month += 1;
+      if (month > 11) {
+        month = 0;
+        year += 1;
+      }
     }
     return { month, year };
   }
@@ -460,8 +509,8 @@ export class CardsComponent implements OnInit, AfterViewInit {
     return { start, end };
   }
 
-  private getBillingCycleBounds(): { start: string; end: string } {
-    const { month, year } = this.getCurrentCycleStartMonth();
+  private getBillingCycleBounds(cards: CardItem[] = []): { start: string; end: string } {
+    const { month, year } = this.getCurrentCycleStartMonth(cards);
     return this.cycleBoundsForStartMonth(month, year);
   }
 
@@ -485,7 +534,7 @@ export class CardsComponent implements OnInit, AfterViewInit {
   }
 
   private buildMonthOptions(count = 12) {
-    let { month, year } = this.getCurrentCycleStartMonth();
+    let { month, year } = this.getListAnchorMonth();
     const options: { label: string; month?: number; year?: number; isFuture?: boolean }[] = [
       { label: 'Future transactions', isFuture: true },
     ];
@@ -506,7 +555,6 @@ export class CardsComponent implements OnInit, AfterViewInit {
     const sums = new Map<string, number>();
     const labels = new Map<string, string>();
     for (const row of cards) {
-      if (row.category === this.EXCLUDED_FROM_TOTAL_CATEGORY) continue;
       const d = new Date(row.date);
       let month = d.getMonth();
       let year = d.getFullYear();
