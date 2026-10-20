@@ -6,7 +6,11 @@ class CardService {
     this.obj = [
       {
         combineInstallments: false,
-        showBrowser: false
+        showBrowser: false,
+        // explicit, not left to puppeteer's own env-var resolution — needed
+        // on ARM (e.g. a Raspberry Pi), where puppeteer's bundled Chrome
+        // download is x86_64-only and won't run; unset on anything else
+        executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined
       },
       {}
     ]

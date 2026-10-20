@@ -94,9 +94,14 @@ async function backfillAmexCard({ monthsBack = 2, headless = false } = {}) {
   // always launch a real headed window (nothing about the page differs from
   // a normal browser) and just position it off-screen when "headless" was
   // requested, so it never actually shows up.
-  const browser = await puppeteer.launch(
-    headless ? { headless: false, args: ['--window-position=-32000,-32000'] } : {}
-  )
+  // explicit, not left to puppeteer's own env-var resolution — needed on ARM
+  // (e.g. a Raspberry Pi), where puppeteer's bundled Chrome download is
+  // x86_64-only and won't run; unset on anything else
+  const executablePath = process.env.PUPPETEER_EXECUTABLE_PATH || undefined
+  const browser = await puppeteer.launch({
+    executablePath,
+    ...(headless ? { headless: false, args: ['--window-position=-32000,-32000'] } : {})
+  })
   try {
     const page = (await browser.pages())[0]
 
@@ -130,6 +135,7 @@ async function backfillAmexCard({ monthsBack = 2, headless = false } = {}) {
     }
 
     if (!allVouchers.length) {
+      console.log('no transactions:', AMEX_CARD_SUFFIX)
       return { success: true, count: 0 }
     }
 
@@ -148,7 +154,7 @@ async function backfillAmexCard({ monthsBack = 2, headless = false } = {}) {
       memo: (v.moreInfo || '').trim(),
     }))
     db.upsertTransactions(txns)
-    console.log(`amex: wrote ${txns.length} transaction(s) for card ${AMEX_CARD_SUFFIX}`)
+    console.log(`card number: ${AMEX_CARD_SUFFIX}, transactions: ${txns.length}`)
     return { success: true, count: txns.length }
   } catch (err) {
     console.error('amex backfill failed:', err)
