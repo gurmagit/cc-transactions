@@ -37,7 +37,9 @@ function billingMonthsBack(n) {
 
 async function loginToIsracard(page, account) {
   console.log(`logging in to isracard (id ${account.id})...`)
-  const response = await page.goto('https://digital.isracard.co.il/personalarea/Login', { waitUntil: 'networkidle2' })
+  // default 30s is too tight on slower hardware (e.g. a Raspberry Pi
+  // rendering under Xvfb, no GPU acceleration)
+  const response = await page.goto('https://digital.isracard.co.il/personalarea/Login', { waitUntil: 'networkidle2', timeout: 90000 })
   if (response && response.status() >= 400) {
     throw new Error(`Failed to navigate to login page, status code: ${response.status()}`)
   }
@@ -107,7 +109,7 @@ async function backfillAmexCard({ monthsBack = 2, headless = false } = {}) {
 
     await loginToIsracard(page, account)
 
-    await page.goto(`https://web.isracard.co.il/transactions?cardSuffix=${AMEX_CARD_SUFFIX}`, { waitUntil: 'networkidle2' })
+    await page.goto(`https://web.isracard.co.il/transactions?cardSuffix=${AMEX_CARD_SUFFIX}`, { waitUntil: 'networkidle2', timeout: 90000 })
     await sleep(1000)
 
     const allVouchers = []
