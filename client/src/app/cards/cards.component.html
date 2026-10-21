@@ -32,13 +32,7 @@
     <button mat-icon-button matSuffix matTooltip="Clear filters" (click)="clearFilters()">
       <mat-icon>filter_alt_off</mat-icon>
     </button>
-    <button mat-icon-button matSuffix
-      [color]="showingFuture ? 'primary' : ''"
-      [matTooltip]="showingFuture ? 'Showing future transactions — click to go back' : 'Show future transactions'"
-      (click)="toggleFutureTransactions()">
-      <mat-icon>update</mat-icon>
-    </button>
-    <button *ngIf="!(isLoading$ | async)" id="link" (click)="downloadCSV()">
+    <button *ngIf="!(isLoading$ | async)" id="link" matTooltip="Download current view as CSV" (click)="downloadCSV()">
       <mat-icon>download</mat-icon>
     </button>
   </div>

@@ -411,17 +411,6 @@ export class CardsComponent implements OnInit, AfterViewInit {
     this.showingFuture = true;
   }
 
-  toggleFutureTransactions() {
-    if (this.showingFuture) {
-      this.setPreviousMonthFilter();
-      this.showingFuture = false;
-    } else {
-      this.setFutureOnlyFilter();
-    }
-    this.reflectDateFilterInputs();
-    this.applyFilter(JSON.stringify(this.searchObj));
-  }
-
   private reflectDateFilterInputs() {
     this.setDateInputValue(this.startDateInput,
       this.searchObj.dates.start ? this.toDisplayDate(this.searchObj.dates.start) : '');
@@ -685,15 +674,34 @@ export class CardsComponent implements OnInit, AfterViewInit {
     const url = window.URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = 'file.csv';
+    a.download = this.downloadFilename();
     console.log('downloadLink:', url);
     a.click();
     window.URL.revokeObjectURL(url);
   }
 
+  // reflects whatever's currently filtered/displayed — a billing-cycle label
+  // when the active date range matches one exactly, falling back to the raw
+  // range (or "future"/"all") otherwise
+  private downloadFilename(): string {
+    if (this.showingFuture) return 'transactions_future.csv';
+    const { start, end } = this.searchObj.dates;
+    if (start && end) {
+      const match = this.monthOptions.find(opt => {
+        if (opt.isFuture) return false;
+        const bounds = this.cycleBoundsForStartMonth(opt.month!, opt.year!);
+        return bounds.start === start && bounds.end === end;
+      });
+      if (match) return `transactions_${match.label.replace(/\s+/g, '_')}.csv`;
+      return `transactions_${start}_to_${end}.csv`;
+    }
+    return 'transactions_all.csv';
+  }
+
   tableToCSV(): string {
     let csvData = [[...this.headers]];
-    this.cardsData.data.forEach(rowObj => {
+    // the current view, not every row — matches what's actually on screen
+    this.cardsData.filteredData.forEach(rowObj => {
       // was Object.values(rowObj) — relied on the object's own key order
       // matching headers exactly, which broke once CardItem gained fields
       // (identifier) that aren't displayed/exported columns
