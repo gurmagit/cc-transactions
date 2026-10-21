@@ -4,6 +4,17 @@ const db = require('./db')
 
 const sleep = ms => new Promise(r => setTimeout(r, ms))
 
+// the scraper library parses each transaction's raw date as *local* midnight,
+// then serializes it with .toISOString() (UTC) — in a timezone ahead of UTC
+// (e.g. Israel) that shifts the date portion back into the previous day.
+// Re-reading it through local getters undoes that shift and recovers the
+// calendar date the library actually meant, instead of naively slicing the
+// UTC string's first 10 characters.
+function toLocalDateStr(isoString) {
+  const d = new Date(isoString)
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
+
 class DataService {
   async fetchData(days, months = 1, companyFilter = null) {
     const startDate = new Date(Date.now() - days * 86400000)
@@ -64,7 +75,7 @@ class DataService {
             result.data.push({
               num,
               identifier: txn.identifier,
-              date: txn.date.slice(0, 10),
+              date: toLocalDateStr(txn.date),
               amount,
               originalAmount: orig,
               originalCurrency: txn.originalCurrency,

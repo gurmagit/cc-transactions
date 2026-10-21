@@ -42,6 +42,7 @@ mat-checkbox {
 
 ::ng-deep .select-cards.mat-mdc-form-field {
   width: auto !important;
+  min-width: 220px !important;
 }
 
 ::ng-deep .select-cards .mat-mdc-text-field-wrapper {
@@ -69,7 +70,7 @@ mat-checkbox {
 }
 
 .search {
-  width: 15%;
+  width: 10%;
   float: left;
 }
 
