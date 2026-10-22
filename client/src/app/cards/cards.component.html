@@ -44,7 +44,7 @@
   </ul>
 </div>
 <div class="content-row">
-<div class="mat-elevation-z8 cards-table">
+<div #cardsTableEl class="mat-elevation-z8 cards-table" [style.width.px]="tableWidthPx" [style.flex]="tableWidthPx ? '0 0 auto' : null">
   <h3 *ngIf="isLoading$ | async">Loading data...</h3>
   <table
     mat-table
@@ -99,6 +99,7 @@
     <tr mat-footer-row *matFooterRowDef="displayedColumns" [hidden]="selectedCards$.value.length==0"></tr>
   </table>
 </div>
+<div class="resize-handle" *ngIf="chartSegments.length" (mousedown)="startResize($event)"></div>
 <div class="chart-panel mat-elevation-z8" *ngIf="chartSegments.length">
   <svg class="pie" viewBox="0 0 240 240" preserveAspectRatio="xMidYMid meet">
     <path *ngFor="let seg of chartSegments" [attr.d]="seg.path" [attr.fill]="seg.color"></path>

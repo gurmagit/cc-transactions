@@ -121,6 +121,30 @@ mat-checkbox {
   margin: 0 15px;
 }
 
+.resize-handle {
+  flex: 0 0 auto;
+  width: 6px;
+  align-self: stretch;
+  cursor: col-resize;
+  position: relative;
+}
+
+.resize-handle::after {
+  content: '';
+  position: absolute;
+  left: 2px;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: #d8d6cf;
+  border-radius: 1px;
+}
+
+.resize-handle:hover::after,
+.resize-handle.resizing::after {
+  background: #2a78d6;
+}
+
 .pie {
   display: block;
   width: 100%;
@@ -226,6 +250,18 @@ mat-checkbox {
   font-weight: 700;
   color: #898781;
   margin-top: 3px;
+  /* like an Excel cell — wrap onto a second line when the column's too
+     narrow for the label on one line. The label has a space between month
+     and year (e.g. "Oct 26"), so default word-boundary wrapping already
+     breaks cleanly there — no need to force mid-word breaks */
+  white-space: normal;
+  text-align: center;
+  line-height: 1.15;
+  /* reserve room for 2 lines always — otherwise a column whose label
+     actually wraps is taller than its neighbors, and since all columns
+     share a bottom edge (.bars' align-items:flex-end), that extra line
+     pushes just that column's bar upward relative to the rest */
+  min-height: 1.4rem;
 }
 
 .sticky {
@@ -258,8 +294,11 @@ table tr:last-child td {
 ::ng-deep .mat-mdc-table,
 ::ng-deep .mdc-data-table__table {
   table-layout: auto !important;
-  width: fit-content !important;
-  min-width: auto !important;
+  /* at least its natural content width (never compressed — the container's
+     overflow:auto scrolls instead), but allowed to stretch to fill a wider
+     container, e.g. after dragging the resize handle to grow .cards-table */
+  width: 100% !important;
+  min-width: fit-content !important;
 }
 
 ::ng-deep th.mat-mdc-header-cell,

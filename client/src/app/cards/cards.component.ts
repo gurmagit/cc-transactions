@@ -45,6 +45,7 @@ export class CardsComponent implements OnInit, AfterViewInit {
   @ViewChild('search') searchInput?: ElementRef<HTMLInputElement>;
   @ViewChild('startDate') startDateInput?: ElementRef<HTMLInputElement>;
   @ViewChild('endDate') endDateInput?: ElementRef<HTMLInputElement>;
+  @ViewChild('cardsTableEl') cardsTableEl?: ElementRef<HTMLElement>;
   selectedCards$ = new BehaviorSubject<string[]>([]);
   fetchErrors$: BehaviorSubject<FetchError[]>;
   allCards: string[] = [];
@@ -58,6 +59,13 @@ export class CardsComponent implements OnInit, AfterViewInit {
   start_date = '';
   end_date = '';
   showingFuture = false;
+
+  // null until the user actually drags the splitter — before that, the
+  // table stays content-sized (its existing flex:0 1 auto behavior)
+  tableWidthPx: number | null = null;
+  private readonly TABLE_WIDTH_STORAGE_KEY = 'cardsTableWidthPx';
+  private readonly MIN_TABLE_WIDTH = 300;
+  private readonly MIN_CHART_WIDTH = 280;
 
   // categorical palette, fixed order — a card (or category) keeps its slot
   // for the whole session regardless of filtering, so color always means
@@ -90,6 +98,7 @@ export class CardsComponent implements OnInit, AfterViewInit {
   private needsDefaultCycle = false;
 
   ngOnInit(): void {
+    this.restoreTableWidth();
     // a page refresh should keep whatever the user was looking at, not
     // reset to the default billing cycle — only genuinely new sessions
     // (no saved state yet) get the default
@@ -563,7 +572,7 @@ export class CardsComponent implements OnInit, AfterViewInit {
       const key = `${endYear}-${String(endMonth + 1).padStart(2, '0')}`;
       sums.set(key, (sums.get(key) || 0) + row.amount);
       if (!labels.has(key)) {
-        labels.set(key, `${this.MONTH_NAMES[endMonth].slice(0, 3)}'${String(endYear).slice(-2)}`);
+        labels.set(key, `${this.MONTH_NAMES[endMonth].slice(0, 3)} ${String(endYear).slice(-2)}`);
       }
     }
 
@@ -629,6 +638,51 @@ export class CardsComponent implements OnInit, AfterViewInit {
       return true;
     } catch {
       return false;
+    }
+  }
+
+  startResize(event: MouseEvent) {
+    event.preventDefault();
+    const startX = event.clientX;
+    const startWidth = this.cardsTableEl?.nativeElement.getBoundingClientRect().width
+      ?? this.tableWidthPx ?? this.MIN_TABLE_WIDTH;
+    const handle = event.currentTarget as HTMLElement;
+    handle.classList.add('resizing');
+
+    const onMove = (e: MouseEvent) => {
+      const maxWidth = window.innerWidth - this.MIN_CHART_WIDTH - 60;
+      this.tableWidthPx = Math.min(
+        Math.max(startWidth + (e.clientX - startX), this.MIN_TABLE_WIDTH),
+        maxWidth
+      );
+    };
+    const onUp = () => {
+      handle.classList.remove('resizing');
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+      this.saveTableWidth();
+    };
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+  }
+
+  private saveTableWidth() {
+    if (this.tableWidthPx == null) return;
+    try {
+      sessionStorage.setItem(this.TABLE_WIDTH_STORAGE_KEY, String(this.tableWidthPx));
+    } catch {
+      // private browsing / storage disabled — just skip persistence
+    }
+  }
+
+  private restoreTableWidth() {
+    try {
+      const raw = sessionStorage.getItem(this.TABLE_WIDTH_STORAGE_KEY);
+      if (!raw) return;
+      const width = parseInt(raw, 10);
+      if (Number.isFinite(width)) this.tableWidthPx = width;
+    } catch {
+      // ignore
     }
   }
 
