@@ -1,4 +1,4 @@
-import { AfterViewInit, Component, ElementRef, OnInit, ViewChild } from '@angular/core';
+import { Component, ElementRef, OnInit, ViewChild } from '@angular/core';
 import { CardService, FetchError } from '../services/card.service';
 import { CardItem } from '../models/card.model';
 import { BehaviorSubject, finalize, switchMap } from 'rxjs';
@@ -18,9 +18,13 @@ interface PieSegment {
   templateUrl: './cards.component.html',
   styleUrls: ['./cards.component.css']
 })
-export class CardsComponent implements OnInit, AfterViewInit {
+export class CardsComponent implements OnInit {
   isLoading$ = new BehaviorSubject<boolean>(false);
   displayedColumns = ['num', 'date', 'amount', 'originalAmount', 'desc', 'memo', 'category'];
+  // a parallel header row, one filter input per column — matColumnDef names
+  // must be unique across the whole table, hence the suffix, not a reuse
+  // of displayedColumns
+  filterColumns = ['numFilter', 'dateFilter', 'amountFilter', 'originalAmountFilter', 'descFilter', 'memoFilter', 'categoryFilter'];
   headers = ['Card Number', 'Date', 'Amount', 'Original Amount', 'Description', 'Comments', 'Category'];
   // mirrors server/services/categorize.js's CATEGORIES — kept in sync by hand
   // since client/server don't share a package
@@ -42,9 +46,6 @@ export class CardsComponent implements OnInit, AfterViewInit {
   get sort(): MatSort | undefined {
     return this._sort;
   }
-  @ViewChild('search') searchInput?: ElementRef<HTMLInputElement>;
-  @ViewChild('startDate') startDateInput?: ElementRef<HTMLInputElement>;
-  @ViewChild('endDate') endDateInput?: ElementRef<HTMLInputElement>;
   @ViewChild('cardsTableEl') cardsTableEl?: ElementRef<HTMLElement>;
   selectedCards$ = new BehaviorSubject<string[]>([]);
   fetchErrors$: BehaviorSubject<FetchError[]>;
@@ -52,8 +53,8 @@ export class CardsComponent implements OnInit, AfterViewInit {
   selectAllChkBox = true;
   totalCost: number = 0;
   searchObj = {
-    wildcard: '',
-    cards: [] as any,
+    columns: { num: '', date: '', amount: '', originalAmount: '', desc: '', memo: '', category: '' },
+    cards: [] as string[],
     dates: { start: '', end: '' }
   };
   start_date = '';
@@ -105,14 +106,6 @@ export class CardsComponent implements OnInit, AfterViewInit {
     this.needsDefaultCycle = !this.restoreFilterState();
     this.buildMonthOptions();
     this.loadHistory();
-  }
-
-  ngAfterViewInit(): void {
-    // deferred: mutating the date inputs synchronously here, during the
-    // initial view-check cycle, makes mat-form-field's derived
-    // hide-placeholder state change after Angular already checked it —
-    // NG0100, which aborts rendering everything else in the template
-    setTimeout(() => this.reflectDateFilterInputs());
   }
 
   fetchData() {
@@ -187,7 +180,6 @@ export class CardsComponent implements OnInit, AfterViewInit {
     if (this.needsDefaultCycle) {
       this.needsDefaultCycle = false;
       this.setPreviousMonthFilter(cards);
-      this.reflectDateFilterInputs();
     }
     this.applyFilter(JSON.stringify(this.searchObj));
   }
@@ -195,7 +187,68 @@ export class CardsComponent implements OnInit, AfterViewInit {
   calculateTotal() {
     this.totalCost = this.cardsData.filteredData
       .reduce((a: number, v: CardItem) => a + v.amount, 0);
+    this.projectedTotal = this.calculateProjection();
     this.buildChartData();
+  }
+
+  projectedTotal: number | null = null;
+  projectionTooltip = '';
+
+  // matches "תשלום N מתוך M" / "תשלום N מ M" anywhere in the memo (the same
+  // installment-counter format already normalized for dedup elsewhere) —
+  // null for a transaction that isn't part of an installment plan at all
+  private getInstallmentNumber(memo: string): number | null {
+    const match = (memo || '').match(/תשלום\s*(\d+)\s*(?:מתוך|מ)\s*\d+/);
+    return match ? parseInt(match[1], 10) : null;
+  }
+
+  // only meaningful while viewing the cycle that's still actually in
+  // progress (the one containing today) — a past cycle is already final,
+  // a custom range or "future" has no fixed end to prorate against
+  private calculateProjection(): number | null {
+    this.projectionTooltip = '';
+    const anchor = this.getListAnchorMonth();
+    const { start, end } = this.cycleBoundsForStartMonth(anchor.month, anchor.year);
+    if (this.searchObj.dates.start !== start || this.searchObj.dates.end !== end) {
+      return null;
+    }
+
+    // transactions typically take ~2 days to clear, so "today" overstates
+    // how much of the cycle we actually have complete data for — both the
+    // elapsed-days count and the base cutoff use this adjusted reference
+    // point instead (installments are pre-scheduled, not subject to this lag)
+    const effectiveToday = new Date();
+    effectiveToday.setDate(effectiveToday.getDate() - 2);
+    const today = this.formatLocalDate(effectiveToday);
+    const daysInCycle = this.daysBetween(start, end) + 1;
+    const daysElapsed = this.daysBetween(start, today) + 1;
+    if (daysElapsed <= 0) return null;
+
+    let base = 0;
+    let laterInstallments = 0;
+    for (const row of this.cardsData.filteredData) {
+      const installmentNum = this.getInstallmentNumber(row.memo);
+      if (installmentNum !== null && installmentNum > 1) {
+        // a fixed, already-known amount regardless of date — counted once,
+        // not scaled by how much of the month has elapsed
+        laterInstallments += row.amount;
+      } else if (row.date <= today) {
+        // actual spend to date only — the part that gets extrapolated
+        base += row.amount;
+      }
+    }
+    const extrapolatedBase = base * daysInCycle / daysElapsed;
+    const total = extrapolatedBase + laterInstallments;
+    this.projectionTooltip =
+      `Day ${daysElapsed} of ${daysInCycle}\n` +
+      `Base so far (non/first-installment): ${base.toFixed(2)}\n` +
+      `Extrapolated base: ${extrapolatedBase.toFixed(2)}\n` +
+      `Later installments (fixed): ${laterInstallments.toFixed(2)}`;
+    return total;
+  }
+
+  private daysBetween(startIso: string, endIso: string): number {
+    return Math.round((new Date(endIso).getTime() - new Date(startIso).getTime()) / 86400000);
   }
 
   private ensureCardColors() {
@@ -337,6 +390,10 @@ export class CardsComponent implements OnInit, AfterViewInit {
     });
   }
 
+  onColumnFilterChange() {
+    this.applyFilter(JSON.stringify(this.searchObj));
+  }
+
   selectAll() {
     if (this.selectAllChkBox) {
       this.selectedCards$.next([...this.allCards]);
@@ -350,7 +407,6 @@ export class CardsComponent implements OnInit, AfterViewInit {
 
   updateSelected(e: string[]) {
     this.selectedCards$.next(e);
-    console.log('e:', e, this.searchObj);
     this.searchObj.cards = e;
     this.syncSelectAllChkBox();
     this.applyFilter(JSON.stringify(this.searchObj));
@@ -364,31 +420,15 @@ export class CardsComponent implements OnInit, AfterViewInit {
       this.allCards.every((c: string) => this.searchObj.cards.includes(c));
   }
 
-  searchFilter(e: any) {
-    console.log('e:', e.target.value);
-    // this.applyFilter(this.searchKey.trim().toLowerCase());
-    this.searchObj.wildcard = e.target.value;
-    this.applyFilter(JSON.stringify(this.searchObj));
-  }
-
   clearFilters() {
-    this.searchObj.wildcard = '';
+    this.searchObj.columns = { num: '', date: '', amount: '', originalAmount: '', desc: '', memo: '', category: '' };
     this.searchObj.dates.start = '';
     this.searchObj.dates.end = '';
     this.searchObj.cards = [...this.allCards];
     this.selectedCards$.next([...this.allCards]);
     this.selectAllChkBox = true;
-    if (this.searchInput) this.searchInput.nativeElement.value = '';
-    this.setDateInputValue(this.startDateInput, '');
-    this.setDateInputValue(this.endDateInput, '');
     this.showingFuture = false;
     this.applyFilter(JSON.stringify(this.searchObj));
-  }
-
-  private setDateInputValue(input: ElementRef<HTMLInputElement> | undefined, value: string) {
-    if (!input) return;
-    input.nativeElement.value = value;
-    input.nativeElement.dispatchEvent(new Event('input'));
   }
 
   selectMonth(opt: { label: string; month?: number; year?: number; isFuture?: boolean }) {
@@ -400,7 +440,6 @@ export class CardsComponent implements OnInit, AfterViewInit {
       this.searchObj.dates.end = end;
       this.showingFuture = false;
     }
-    this.reflectDateFilterInputs();
     this.applyFilter(JSON.stringify(this.searchObj));
   }
 
@@ -418,21 +457,6 @@ export class CardsComponent implements OnInit, AfterViewInit {
     this.searchObj.dates.start = this.formatLocalDate(tomorrow);
     this.searchObj.dates.end = '';
     this.showingFuture = true;
-  }
-
-  private reflectDateFilterInputs() {
-    this.setDateInputValue(this.startDateInput,
-      this.searchObj.dates.start ? this.toDisplayDate(this.searchObj.dates.start) : '');
-    this.setDateInputValue(this.endDateInput,
-      this.searchObj.dates.end ? this.toDisplayDate(this.searchObj.dates.end) : '');
-    if (this.searchInput) {
-      this.searchInput.nativeElement.value = this.searchObj.wildcard;
-    }
-  }
-
-  private toDisplayDate(isoDate: string): string {
-    const [y, m, d] = isoDate.split('-');
-    return `${d}/${m}/${y}`;
   }
 
   // the default billing cycle is normally named after today's calendar month
@@ -597,16 +621,6 @@ export class CardsComponent implements OnInit, AfterViewInit {
     return `${y}-${m}-${day}`;
   }
 
-  datePicker(sDate: any, eDate: any) {
-    const start = sDate.value ? this.formatDate(sDate.value) : '';
-    const end = eDate.value ? this.formatDate(eDate.value) : '';
-    console.log('picker:', start, end);
-    this.searchObj.dates.start = start;
-    this.searchObj.dates.end = end;
-    this.showingFuture = false;
-    this.applyFilter(JSON.stringify(this.searchObj));
-  }
-
   applyFilter(filter: string) {
     this.cardsData.filter = filter;
     this.calculateTotal();
@@ -633,6 +647,9 @@ export class CardsComponent implements OnInit, AfterViewInit {
       const raw = sessionStorage.getItem(this.FILTER_STORAGE_KEY);
       if (!raw) return false;
       const { searchObj, showingFuture } = JSON.parse(raw);
+      // a previous session's saved shape (e.g. from before per-column
+      // filters existed) would otherwise crash setFilter() on first run
+      if (!searchObj?.columns || !searchObj?.dates || !Array.isArray(searchObj?.cards)) return false;
       this.searchObj = searchObj;
       this.showingFuture = !!showingFuture;
       return true;
@@ -698,27 +715,26 @@ export class CardsComponent implements OnInit, AfterViewInit {
         cachedSearch = JSON.parse(filter);
       }
       const search = cachedSearch;
-      const wc = search.wildcard.toLowerCase();
-      // desc/memo can be null in the DB (confirmed: at least one stored row
-      // has memo === null) — .toLowerCase() on null throws, which silently
-      // breaks the whole filter operation, not just that one row
-      const matchSearch = wc === '' ||
-        (data.num || '').toLowerCase().includes(wc) ||
-        (data.date || '').toLowerCase().includes(wc) ||
-        (data.desc || '').toLowerCase().includes(wc) ||
-        (data.memo || '').toLowerCase().includes(wc) ||
-        String(data.amount).includes(wc) ||
-        String(data.originalAmount).includes(wc);
+      const cols = search.columns;
+      // desc/memo/category can be null in the DB — .toLowerCase() on null
+      // throws, which silently breaks the whole filter, not just that row
+      const matchCol = (value: any, key: string) => {
+        const q = (cols[key] || '').toLowerCase();
+        return q === '' || String(value ?? '').toLowerCase().includes(q);
+      };
+      const matchColumns =
+        matchCol(data.num, 'num') &&
+        matchCol(data.date, 'date') &&
+        matchCol(data.amount, 'amount') &&
+        matchCol(data.originalAmount, 'originalAmount') &&
+        matchCol(data.desc, 'desc') &&
+        matchCol(data.memo, 'memo') &&
+        matchCol(data.category, 'category');
       const matchCards = search.cards.includes(data.num);
       const matchDate = (search.dates.start === '' || data.date >= search.dates.start) &&
         (search.dates.end === '' || data.date <= search.dates.end);
-      return matchCards && matchSearch && matchDate;
+      return matchCards && matchColumns && matchDate;
     }
-  }
-
-  formatDate(s: string): string {
-    const a = s.split('/');
-    return `${a[2]}-${a[1].padStart(2, '0')}-${a[0].padStart(2, '0')}`;
   }
 
   downloadCSV() {
