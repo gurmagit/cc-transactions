@@ -87,7 +87,15 @@ const selectManualExamplesStmt = db.prepare(`
   LIMIT ?
 `)
 const existsStmt = db.prepare('SELECT 1 FROM transactions WHERE num = ? AND identifier = ?')
-const sameAmountStmt = db.prepare('SELECT identifier, date, desc, memo FROM transactions WHERE num = ? AND amount = ?')
+// matched on originalAmount, not amount — a pending transaction can be
+// stored with amount 0 (confirmed later, e.g. once a fallback-identifier
+// row's real identifier arrives) or have its ILS conversion adjusted, while
+// originalAmount (what was actually charged, in its original currency) is
+// set from the start and stays stable. desc+memo+date-proximity (checked
+// below) is still required either way.
+const sameOriginalAmountStmt = db.prepare(
+  'SELECT identifier, date, desc, memo FROM transactions WHERE num = ? AND originalAmount = ?'
+)
 
 // Max transactions without dealData (standing orders, refunds, etc.) come back
 // with identifier === undefined; node:sqlite throws on an undefined bind rather
@@ -122,7 +130,7 @@ const FUZZY_DEDUP_EXCLUDED_DESCS = ['ליברה עסקאות ביטוח'].map(no
 function findFuzzyDuplicate(txn) {
   const txnDesc = normalizeText(txn.desc)
   if (FUZZY_DEDUP_EXCLUDED_DESCS.includes(txnDesc)) return null
-  const candidates = sameAmountStmt.all(txn.num, txn.amount)
+  const candidates = sameOriginalAmountStmt.all(txn.num, txn.originalAmount)
   const txnMemo = normalizeText(txn.memo)
   for (const c of candidates) {
     if (normalizeText(c.desc) !== txnDesc) continue
