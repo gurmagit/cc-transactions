@@ -1,7 +1,6 @@
 // Standalone script — not part of the app. Run manually when you want to pull
 // older history for the regular Isracard cards (both logins). Card 3802 is
-// handled separately by backfill-amex.js, since it needs a different
-// scraping path (Amex's own site blocks automated access):
+// handled separately by backfill-amex.js, since it's a different login:
 //   node backfill-isracard.js [days]
 // Defaults to 365 days back. Writes straight to the db (same path data.js uses).
 const { dataService } = require('./services/data')

@@ -21,6 +21,7 @@ class CardService {
     switch (companyId) {
       case 'isracard':
         this.obj[0].companyId = CompanyTypes.isracard;
+        this.obj[0].defaultTimeout = undefined;
         this.obj[1] = {
           id: JSON.parse(process.env.ACCOUNTS_JSON)[n].id,
           card6Digits: JSON.parse(process.env.ACCOUNTS_JSON)[n].card6Digits
@@ -28,6 +29,9 @@ class CardService {
         break;
       case 'amex':
         this.obj[0].companyId = CompanyTypes.amex;
+        // Cloudflare's browser challenge on he.americanexpress.co.il can take
+        // longer than puppeteer's 30s default navigation timeout to resolve
+        this.obj[0].defaultTimeout = 90000;
         this.obj[1] = {
           id: JSON.parse(process.env.ACCOUNTS_JSON)[n].id,
           card6Digits: JSON.parse(process.env.ACCOUNTS_JSON)[n].card6Digits
@@ -35,6 +39,7 @@ class CardService {
         break;
       case 'max':
         this.obj[0].companyId = CompanyTypes.max;
+        this.obj[0].defaultTimeout = undefined;
         this.obj[1] = {
           username: JSON.parse(process.env.ACCOUNTS_JSON)[n].username
         }
