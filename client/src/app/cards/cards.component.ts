@@ -30,7 +30,7 @@ export class CardsComponent implements OnInit {
   // since client/server don't share a package
   readonly CATEGORIES = [
     'ביגוד', 'בילויים', 'סופר', 'בריאות ושיניים', 'ביטוח', 'תחבורה',
-    'עירייה וממשלה', 'תקשורת', 'חשבונות בית', 'טיפוח וכושר', 'חיות מחמד', 'חצר וגינה', 'החזרים', 'חופשה', 'שונות',
+    'עירייה וממשלה', 'תקשורת', 'חשבונות בית', 'טיפוח וכושר', 'חיות מחמד', 'חצר וגינה', 'החזרים', 'חופשה', 'ילדים', 'שונות',
   ];
   // reimbursements count toward every total like any other transaction, but
   // get a lighter row color in the table so they're still visually called out
