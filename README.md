@@ -55,6 +55,14 @@ Amex's own site blocks automated access, but the Amex-branded card is reachable 
 - `server/backfill-amex.js` — standalone full-year backfill script: `node backfill-amex.js`.
 - `server/backfill-max.js` — standalone backfill script scoped to just the Max account (e.g. to backfill history without re-touching Isracard): `node backfill-max.js`.
 
+## Scheduled daily scrape
+
+`server/daily-scrape.js` — standalone script equivalent to pressing Submit in the UI (scrapes the last 30 days + 2 future months, then categorizes new transactions). Meant to be run on a schedule (e.g. cron), not manually: `node daily-scrape.js`.
+
+## Scrape failure visibility
+
+Every scrape (Submit or `daily-scrape.js`) records its outcome to `server/data/scrape-status.json` via `db.recordScrapeResult()`, served at `GET /cards/scrape-status`. The dashboard shows a dismissible banner when the last scrape failed, so a failed scheduled run doesn't go unnoticed just because no one was watching the terminal.
+
 ## Duplicate prevention
 
 `server/services/db.js` upserts on `(num, identifier)`, but different sources can report the same real transaction under different identifiers or slightly different dates. Before inserting an unrecognized identifier, it also checks for a fuzzy duplicate — same card, amount, normalized description, and normalized memo, within 2 days — and skips it if found. A small exclusion list (`FUZZY_DEDUP_EXCLUDED_DESCS`) protects legitimate recurring charges that can land within 2 days of themselves from being wrongly skipped.
