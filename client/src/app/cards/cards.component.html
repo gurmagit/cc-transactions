@@ -11,7 +11,7 @@
     </mat-form-field>
     <mat-form-field subscriptSizing="dynamic" class="month-select">
       <mat-label>Billing cycle</mat-label>
-      <mat-select (selectionChange)="selectMonth($event.value)">
+      <mat-select [value]="selectedMonthOption" [compareWith]="compareMonthOptions" (selectionChange)="selectMonth($event.value)">
         <mat-option *ngFor="let opt of monthOptions" [value]="opt">{{opt.label}}</mat-option>
       </mat-select>
     </mat-form-field>
@@ -23,11 +23,22 @@
     </button>
   </div>
 </div>
-<div class="fetch-errors" *ngIf="(fetchErrors$ | async)?.length" style="color: #b00020; margin: 8px 0;">
-  <strong>Some accounts failed to refresh — their data is missing from this view:</strong>
-  <ul style="margin: 4px 0;">
-    <li *ngFor="let err of (fetchErrors$ | async)">{{err.company}} ({{err.type}}): {{err.message}}</li>
-  </ul>
+<div class="scrape-status" *ngIf="showScrapeStatusBanner" style="color: #b00020; margin: 8px 0; display: flex; align-items: center; gap: 8px; clear: both;">
+  <span style="flex: 1;"><strong>Last scrape ({{lastScrapeStatus?.timestamp | date:'short'}}) failed:</strong> {{lastScrapeStatus?.error}}</span>
+  <button mat-icon-button matTooltip="Dismiss" (click)="dismissScrapeStatus()">
+    <mat-icon>close</mat-icon>
+  </button>
+</div>
+<div class="fetch-errors" *ngIf="(fetchErrors$ | async)?.length" style="color: #b00020; margin: 8px 0; display: flex; align-items: flex-start; gap: 8px; clear: both;">
+  <div style="flex: 1;">
+    <strong>Some accounts failed to refresh — their data is missing from this view:</strong>
+    <ul style="margin: 4px 0;">
+      <li *ngFor="let err of (fetchErrors$ | async)">{{err.company}} ({{err.type}}): {{err.message}}</li>
+    </ul>
+  </div>
+  <button mat-icon-button matTooltip="Dismiss" (click)="dismissFetchErrors()">
+    <mat-icon>close</mat-icon>
+  </button>
 </div>
 <div class="content-row">
 <div #cardsTableEl class="mat-elevation-z8 cards-table" [style.width.px]="tableWidthPx" [style.flex]="tableWidthPx ? '0 0 auto' : null">

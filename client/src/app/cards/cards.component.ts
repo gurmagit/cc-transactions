@@ -1,5 +1,5 @@
 import { Component, ElementRef, OnInit, ViewChild } from '@angular/core';
-import { CardService, FetchError } from '../services/card.service';
+import { CardService, FetchError, ScrapeStatus } from '../services/card.service';
 import { CardItem } from '../models/card.model';
 import { BehaviorSubject, finalize, switchMap } from 'rxjs';
 import { MatSort } from '@angular/material/sort';
@@ -11,6 +11,10 @@ interface PieSegment {
   num: string; total: number; color: string; path: string;
   inside: boolean; labelX: number; labelY: number; labelColor: string; textAnchor: string;
   leaderPoints?: string;
+}
+
+interface MonthOption {
+  label: string; month?: number; year?: number; isFuture?: boolean;
 }
 
 @Component({
@@ -98,6 +102,25 @@ export class CardsComponent implements OnInit {
   // picked only once real data has loaded — see hasRealDataForNextCycle
   private needsDefaultCycle = false;
 
+  lastScrapeStatus: ScrapeStatus | null = null;
+  // dismissing hides the banner until a *different* failure shows up, not
+  // just until the next scrape — a second consecutive failure is still
+  // worth re-flagging even though lastScrapeStatus technically changed shape
+  private dismissedScrapeStatusTimestamp: string | null = null;
+
+  get showScrapeStatusBanner(): boolean {
+    return !!this.lastScrapeStatus && !this.lastScrapeStatus.success &&
+      this.lastScrapeStatus.timestamp !== this.dismissedScrapeStatusTimestamp;
+  }
+
+  dismissScrapeStatus() {
+    this.dismissedScrapeStatusTimestamp = this.lastScrapeStatus?.timestamp ?? null;
+  }
+
+  dismissFetchErrors() {
+    this.fetchErrors$.next([]);
+  }
+
   ngOnInit(): void {
     this.restoreTableWidth();
     // a page refresh should keep whatever the user was looking at, not
@@ -106,15 +129,28 @@ export class CardsComponent implements OnInit {
     this.needsDefaultCycle = !this.restoreFilterState();
     this.buildMonthOptions();
     this.loadHistory();
+    this.refreshScrapeStatus();
+  }
+
+  // flags a scheduled (cron) run that failed with no one watching — also
+  // re-checked after a manual Submit, since that overwrites the same status
+  private refreshScrapeStatus() {
+    this.cardService.getScrapeStatus().subscribe({
+      next: (status) => this.lastScrapeStatus = status,
+      error: (err: any) => console.error('getScrapeStatus failed:', err)
+    });
   }
 
   fetchData() {
     this.isLoading$.next(true);
-    this.cardService.triggerScrape(30, 1).pipe(
+    this.cardService.triggerScrape(30, 2).pipe(
       switchMap(() => this.cardService.getTransactions()),
       finalize(() => this.isLoading$.next(false))
     ).subscribe({
-      next: (cards: CardItem[]) => this.applyCards(cards),
+      next: (cards: CardItem[]) => {
+        this.applyCards(cards);
+        this.refreshScrapeStatus();
+      },
       error: (err: any) => {
         console.error('fetchData failed:', err);
         this.fetchErrors$.next([{ company: 'request', message: err?.message || 'Request to the server failed' }]);
@@ -182,6 +218,7 @@ export class CardsComponent implements OnInit {
       this.setPreviousMonthFilter(cards);
     }
     this.applyFilter(JSON.stringify(this.searchObj));
+    this.syncSelectedMonthOption();
   }
 
   calculateTotal() {
@@ -429,9 +466,10 @@ export class CardsComponent implements OnInit {
     this.selectAllChkBox = true;
     this.showingFuture = false;
     this.applyFilter(JSON.stringify(this.searchObj));
+    this.syncSelectedMonthOption();
   }
 
-  selectMonth(opt: { label: string; month?: number; year?: number; isFuture?: boolean }) {
+  selectMonth(opt: MonthOption) {
     if (opt.isFuture) {
       this.setFutureOnlyFilter();
     } else {
@@ -441,6 +479,29 @@ export class CardsComponent implements OnInit {
       this.showingFuture = false;
     }
     this.applyFilter(JSON.stringify(this.searchObj));
+    this.syncSelectedMonthOption();
+  }
+
+  // the mat-select's own value binding — selectMonth() above only fires on a
+  // user pick, so this also needs calling whenever dates/showingFuture are
+  // set another way (restored from sessionStorage, the initial default
+  // cycle, or Clear filters), otherwise the dropdown shows no selection even
+  // though a cycle filter is actually active
+  selectedMonthOption: MonthOption | null = null;
+
+  compareMonthOptions(a: MonthOption | null, b: MonthOption | null): boolean {
+    if (!a || !b) return a === b;
+    return a.isFuture ? !!b.isFuture : a.month === b.month && a.year === b.year;
+  }
+
+  private syncSelectedMonthOption() {
+    this.selectedMonthOption = this.showingFuture
+      ? this.monthOptions.find(o => o.isFuture) ?? null
+      : this.monthOptions.find(o =>
+          o.month !== undefined &&
+          this.cycleBoundsForStartMonth(o.month, o.year!).start === this.searchObj.dates.start &&
+          this.cycleBoundsForStartMonth(o.month, o.year!).end === this.searchObj.dates.end
+        ) ?? null;
   }
 
   private setPreviousMonthFilter(cards: CardItem[] = this.cardsData?.data || []) {
@@ -541,7 +602,7 @@ export class CardsComponent implements OnInit {
     'July', 'August', 'September', 'October', 'November', 'December',
   ];
 
-  monthOptions: { label: string; month?: number; year?: number; isFuture?: boolean }[] = [];
+  monthOptions: MonthOption[] = [];
 
   // the card company names a cycle by the month it closes in, not the month
   // it starts in — a 13-Sep-to-12-Oct cycle is "the October cycle"
@@ -557,7 +618,7 @@ export class CardsComponent implements OnInit {
 
   private buildMonthOptions(count = 12) {
     let { month, year } = this.getListAnchorMonth();
-    const options: { label: string; month?: number; year?: number; isFuture?: boolean }[] = [
+    const options: MonthOption[] = [
       { label: 'Future transactions', isFuture: true },
     ];
     for (let i = 0; i < count; i++) {

@@ -15,6 +15,12 @@ interface CardsResponse {
   errors: FetchError[];
 }
 
+export interface ScrapeStatus {
+  timestamp: string;
+  success: boolean;
+  error?: string;
+}
+
 @Injectable({ providedIn: 'root' })
 export class CardService {
   constructor(
@@ -38,6 +44,10 @@ export class CardService {
         return errors;
       })
     );
+  }
+
+  getScrapeStatus(): Observable<ScrapeStatus | null> {
+    return this.http.get<ScrapeStatus | null>(`${this.url}/scrape-status`);
   }
 
   getTransactions(): Observable<CardItem[]> {

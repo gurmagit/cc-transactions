@@ -243,8 +243,30 @@ function getManualCategoryExamples(limit = 40) {
   return selectManualExamplesStmt.all(limit)
 }
 
+// last scrape's outcome (scheduled cron run or manual Submit) — lets the
+// dashboard flag a failure that happened with no one watching, e.g. cron
+const scrapeStatusFile = path.join(dataDir, 'scrape-status.json')
+
+function getScrapeStatus() {
+  try {
+    return JSON.parse(fs.readFileSync(scrapeStatusFile, 'utf8'))
+  } catch {
+    return null
+  }
+}
+
+function setScrapeStatus(status) {
+  fs.writeFileSync(scrapeStatusFile, JSON.stringify(status))
+}
+
+function recordScrapeResult(errors) {
+  setScrapeStatus(errors.length
+    ? { timestamp: new Date().toISOString(), success: false, error: errors.map(e => `${e.company}: ${e.message}`).join('; ') }
+    : { timestamp: new Date().toISOString(), success: true })
+}
+
 module.exports = {
   upsertTransactions, insertBalanceSnapshot, getAllTransactions,
   getUncategorized, setCategory, setCategories, setCategoryByCriteria,
-  getManualCategoryExamples,
+  getManualCategoryExamples, getScrapeStatus, setScrapeStatus, recordScrapeResult,
 }

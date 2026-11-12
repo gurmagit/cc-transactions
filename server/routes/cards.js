@@ -10,6 +10,7 @@ router.get('/', async (req, res) => {
   const days = parseInt(query.days) || 30;
   const months = parseInt(query.months) || 0;
   const result = await dataService.fetchData(days, months);
+  db.recordScrapeResult(result.errors);
 
   // categorize whatever's new (or previously failed) — never fails the
   // Submit response over this, just leaves those rows uncategorized to
@@ -38,6 +39,10 @@ router.get('/', async (req, res) => {
 
 router.get('/transactions', (req, res) => {
   res.send(db.getAllTransactions());
+});
+
+router.get('/scrape-status', (req, res) => {
+  res.send(db.getScrapeStatus());
 });
 
 router.patch('/transactions/bulk-category', (req, res) => {

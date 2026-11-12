@@ -14,9 +14,10 @@ console.log = (...args) => origLog(new Date().toISOString(), ...args)
 console.error = (...args) => origError(new Date().toISOString(), ...args)
 
 async function main() {
-  const result = await dataService.fetchData(30, 1)
+  const result = await dataService.fetchData(30, 2)
   console.log(`scraped: ${result.data.length} transaction(s), ${result.errors.length} error(s)`)
   if (result.errors.length) console.log(result.errors)
+  db.recordScrapeResult(result.errors)
 
   const toCategorize = db.getUncategorized()
   if (toCategorize.length) {
@@ -27,4 +28,7 @@ async function main() {
   }
 }
 
-main().catch(err => console.error('daily-scrape crashed:', err))
+main().catch(err => {
+  console.error('daily-scrape crashed:', err)
+  db.setScrapeStatus({ timestamp: new Date().toISOString(), success: false, error: err.message })
+})
