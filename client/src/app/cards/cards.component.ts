@@ -143,7 +143,7 @@ export class CardsComponent implements OnInit {
 
   fetchData() {
     this.isLoading$.next(true);
-    this.cardService.triggerScrape(30, 2).pipe(
+    this.cardService.triggerScrape(30, 3).pipe(
       switchMap(() => this.cardService.getTransactions()),
       finalize(() => this.isLoading$.next(false))
     ).subscribe({

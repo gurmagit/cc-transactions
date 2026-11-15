@@ -57,7 +57,7 @@ Amex's own site blocks automated access, but the Amex-branded card is reachable 
 
 ## Scheduled daily scrape
 
-`server/daily-scrape.js` — standalone script equivalent to pressing Submit in the UI (scrapes the last 30 days + 2 future months, then categorizes new transactions). Meant to be run on a schedule (e.g. cron), not manually: `node daily-scrape.js`.
+`server/daily-scrape.js` — standalone script equivalent to pressing Submit in the UI (scrapes the last 30 days + 3 future months, then categorizes new transactions). Meant to be run on a schedule (e.g. cron), not manually: `node daily-scrape.js`.
 
 ## Scrape failure visibility
 
