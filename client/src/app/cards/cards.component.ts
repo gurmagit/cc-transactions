@@ -105,8 +105,17 @@ export class CardsComponent implements OnInit {
   lastScrapeStatus: ScrapeStatus | null = null;
   // dismissing hides the banner until a *different* failure shows up, not
   // just until the next scrape — a second consecutive failure is still
-  // worth re-flagging even though lastScrapeStatus technically changed shape
-  private dismissedScrapeStatusTimestamp: string | null = null;
+  // worth re-flagging even though lastScrapeStatus technically changed shape.
+  // Persisted (sessionStorage, same as the filter state) so a page refresh
+  // doesn't resurrect a failure the user already dismissed this session
+  private readonly SCRAPE_STATUS_DISMISS_KEY = 'cardsDismissedScrapeStatus';
+  private dismissedScrapeStatusTimestamp: string | null = (() => {
+    try {
+      return sessionStorage.getItem('cardsDismissedScrapeStatus');
+    } catch {
+      return null;
+    }
+  })();
 
   get showScrapeStatusBanner(): boolean {
     return !!this.lastScrapeStatus && !this.lastScrapeStatus.success &&
@@ -115,6 +124,13 @@ export class CardsComponent implements OnInit {
 
   dismissScrapeStatus() {
     this.dismissedScrapeStatusTimestamp = this.lastScrapeStatus?.timestamp ?? null;
+    try {
+      if (this.dismissedScrapeStatusTimestamp) {
+        sessionStorage.setItem(this.SCRAPE_STATUS_DISMISS_KEY, this.dismissedScrapeStatusTimestamp);
+      }
+    } catch {
+      // private browsing / storage disabled — just skip persistence
+    }
   }
 
   dismissFetchErrors() {

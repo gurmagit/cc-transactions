@@ -113,10 +113,16 @@ class DataService {
           account.txns.forEach(txn => {
             const amount = isInstallmentOriginationRow(txn.memo) ? 0 : sign * txn.chargedAmount
             const orig = sign * txn.originalAmount
+            // abroad charges clear with a delay — the bank's own site shows them
+            // under that later clearing date, not the purchase date. Domestic ILS
+            // txns keep their real purchase date (processedDate there is just the
+            // account's uniform statement date, not per-transaction). originalCurrency
+            // can be ILS for these too, so check the library's own raw signal instead
+            const isForeign = !!txn.rawTransaction?.dealSumOutbound
             result.data.push({
               num,
               identifier: txn.identifier,
-              date: toLocalDateStr(txn.date),
+              date: toLocalDateStr(isForeign ? txn.processedDate : txn.date),
               amount,
               originalAmount: orig,
               originalCurrency: txn.originalCurrency,
@@ -161,6 +167,10 @@ class DataService {
       const credentials = obj[1]
       option.startDate = new Date(startDate)
       option.futureMonthsToScrape = months
+      // lets us check rawTransaction.dealSumOutbound below — the library's own
+      // signal for "this is an abroad/delayed-clearing transaction", since
+      // originalCurrency/chargedCurrency can both come back ILS even for those
+      option.includeRawTransaction = true
       const label = account.card6Digits
         ? `${account.companyId} (…${String(account.card6Digits).slice(-4)})`
         : account.companyId
