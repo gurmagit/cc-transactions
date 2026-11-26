@@ -27,7 +27,7 @@ Create `server/.env` (git-ignored, never commit this file) with:
 |---|---|
 | `PASSWORD1` | Login password used for first account |
 | `PASSWORD2` | Login password used for second account |
-| `ACCOUNTS_JSON` | JSON array of accounts to scrape, e.g. `[{"companyId":"isracard","id":"...","card6Digits":"..."},{"companyId":"max","username":"..."}]` |
+| `ACCOUNTS_JSON` | JSON array of accounts to scrape, e.g. `[{"companyId":"isracard","id":"...","card6Digits":"...","passwordKey":"PASSWORD1"},{"companyId":"max","username":"...","passwordKey":"PASSWORD1"}]` — `passwordKey` names which env var (`PASSWORD1`/`PASSWORD2`) to log in with; accounts sharing a login (e.g. an Amex-branded card under an Isracard account) use the same `passwordKey` |
 
 Run with `node server.js` (listens on port 3010). On first run it creates `server/data/history.db` (git-ignored).
 
