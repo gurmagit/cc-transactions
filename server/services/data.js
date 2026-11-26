@@ -53,9 +53,11 @@ class DataService {
         try {
           const accounts = await this.withRetry(async () => {
             const scraper = createScraper(obj.option)
-            obj.credentials.password = ['000000', '000000'].includes(obj.credentials.card6Digits)
-              ? process.env.PASSWORD2
-              : process.env.PASSWORD1
+            // which password env var to log in with — accounts sharing a login
+            // (e.g. an Amex-branded card under the same Isracard account) share
+            // a passwordKey too. Set per-account in ACCOUNTS_JSON, not hardcoded
+            // here, since which accounts share a login is account-specific, not code
+            obj.credentials.password = process.env[obj.passwordKey || 'PASSWORD1']
             const scrapeResult = await scraper.scrape(obj.credentials)
             if (!scrapeResult.success) {
               const err = new Error(
@@ -174,7 +176,7 @@ class DataService {
       const label = account.card6Digits
         ? `${account.companyId} (…${String(account.card6Digits).slice(-4)})`
         : account.companyId
-      arr.push({ option, credentials, label })
+      arr.push({ option, credentials, label, passwordKey: account.passwordKey })
     })
     return arr
   }
